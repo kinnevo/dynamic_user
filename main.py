@@ -4,7 +4,7 @@ import uuid
 from utils.layouts import create_navigation_menu, create_navigation_menu_2
 from utils.database import create_user
 from pages.reportes import reportes_page
-from utils.state import logout
+from utils.state import init_global_state, get_logout_state, set_logout_state
 
 
 #logout = False
@@ -12,6 +12,8 @@ from utils.state import logout
 @app.on_startup
 def on_startup():
     print("Starting up...")
+    init_global_state()  # Initialize the global state
+
 
 @app.on_shutdown
 def on_shutdown():
@@ -30,6 +32,9 @@ def get_visit_count() -> int:
 
 @ui.page('/')
 def home():
+    if get_logout_state():  # Check the global state
+        # Handle logout logic here
+        set_logout_state(False)  # Reset the logout flag
     create_navigation_menu_2()
     with ui.header().classes('items-center justify-between'):
         ui.label('Reto a resolver').classes('text-h3')
