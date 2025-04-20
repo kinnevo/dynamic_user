@@ -5,6 +5,7 @@ from utils.database import PostgresAdapter
 from utils.langflow_client import LangflowClient
 from utils.message_router import MessageRouter
 from pages.reportes import reportes_page
+from pages.admin import page_admin
 from pages.chat import chat_page
 from pages.home import home
 
@@ -24,6 +25,7 @@ def on_startup():
     print("Starting up...")
     # Initialize database connection
     db_adapter._init_db()
+
 
 @app.on_shutdown
 def on_shutdown():

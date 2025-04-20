@@ -38,23 +38,24 @@ class PostgresAdapter(DatabaseInterface):
         try:
             with conn.cursor() as cursor:
                 cursor.execute('''
-                    CREATE TABLE IF NOT EXISTS users (
+                    CREATE TABLE IF NOT EXISTS fi_users (
                         user_id SERIAL PRIMARY KEY,
                         session_id TEXT NOT NULL UNIQUE,
                         status TEXT DEFAULT 'Idle',
                         last_active TIMESTAMP,
                         explorations_completed INTEGER DEFAULT 0,
-                        full_exploration BOOLEAN DEFAULT FALSE
+                        full_exploration BOOLEAN DEFAULT FALSE,
+                        logged BOOLEAN DEFAULT FALSE
                     );
                     
-                    CREATE TABLE IF NOT EXISTS messages (
+                    CREATE TABLE IF NOT EXISTS fi_messages (
                         message_id SERIAL PRIMARY KEY,
                         session_id TEXT NOT NULL,
                         user_id INTEGER NOT NULL,
                         content TEXT NOT NULL,
                         role TEXT NOT NULL,
                         timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY (user_id) REFERENCES users(user_id)
+                        FOREIGN KEY (user_id) REFERENCES fi_users(user_id)
                     );
                 ''')
             conn.commit()
@@ -79,7 +80,7 @@ class PostgresAdapter(DatabaseInterface):
             try:
                 # First check if user exists by user_id
                 with conn.cursor() as cursor:
-                    cursor.execute("SELECT user_id, session_id FROM users WHERE user_id = %s", (user_id,))
+                    cursor.execute("SELECT user_id, session_id FROM fi_users WHERE user_id = %s", (user_id,))
                     result = cursor.fetchone()
                     
                     # If user exists but has different session_id, use the found user's session_id
@@ -89,7 +90,7 @@ class PostgresAdapter(DatabaseInterface):
                     
                     # If user doesn't exist, check if session exists with different user_id
                     if not result:
-                        cursor.execute("SELECT user_id FROM users WHERE session_id = %s", (session_id,))
+                        cursor.execute("SELECT user_id FROM fi_users WHERE session_id = %s", (session_id,))
                         session_result = cursor.fetchone()
                         
                         if session_result:
@@ -100,7 +101,7 @@ class PostgresAdapter(DatabaseInterface):
                             # Neither user nor session exists, create new user
                             print(f"Creating new user for session {session_id}")
                             cursor.execute(
-                                "INSERT INTO users (session_id, last_active, status) VALUES (%s, %s, %s) RETURNING user_id",
+                                "INSERT INTO fi_users (session_id, last_active, status) VALUES (%s, %s, %s) RETURNING user_id",
                                 (session_id, datetime.now(), 'Active')
                             )
                             user_id = cursor.fetchone()[0]
@@ -108,7 +109,7 @@ class PostgresAdapter(DatabaseInterface):
                     
                     # Update last_active time
                     cursor.execute(
-                        "UPDATE users SET last_active = %s WHERE user_id = %s",
+                        "UPDATE fi_users SET last_active = %s WHERE user_id = %s",
                         (datetime.now(), user_id)
                     )
                     conn.commit()
@@ -116,7 +117,7 @@ class PostgresAdapter(DatabaseInterface):
                 # Now save the message
                 with conn.cursor() as cursor:
                     cursor.execute(
-                        "INSERT INTO messages (session_id, user_id, content, role) VALUES (%s, %s, %s, %s) RETURNING message_id",
+                        "INSERT INTO fi_messages (session_id, user_id, content, role) VALUES (%s, %s, %s, %s) RETURNING message_id",
                         (session_id, user_id, content, role)
                     )
                     message_id = cursor.fetchone()[0]
@@ -143,7 +144,7 @@ class PostgresAdapter(DatabaseInterface):
         try:
             with conn.cursor(cursor_factory=DictCursor) as cursor:
                 cursor.execute(
-                    "SELECT * FROM messages WHERE session_id = %s ORDER BY timestamp",
+                    "SELECT * FROM fi_messages WHERE session_id = %s ORDER BY timestamp",
                     (session_id,)
                 )
                 rows = cursor.fetchall()
@@ -163,20 +164,20 @@ class PostgresAdapter(DatabaseInterface):
     
     def get_recent_messages(self, session_id: str, limit: int = 10) -> List[Dict[str, Any]]:
         """
-        Get recent messages for a session
+        Get recent fi_messages for a session
         
         Args:
             session_id: Unique session identifier
-            limit: Maximum number of messages to return
+            limit: Maximum number of fi_messages to return
             
         Returns:
-            List of recent messages
+            List of recent fi_messages
         """
         conn = self.connection_pool.getconn()
         try:
             with conn.cursor(cursor_factory=DictCursor) as cursor:
                 cursor.execute(
-                    "SELECT * FROM messages WHERE session_id = %s ORDER BY timestamp DESC LIMIT %s",
+                    "SELECT * FROM fi_messages WHERE session_id = %s ORDER BY timestamp DESC LIMIT %s",
                     (session_id, limit)
                 )
                 rows = cursor.fetchall()
@@ -203,7 +204,7 @@ class PostgresAdapter(DatabaseInterface):
         try:
             # First check if the session already exists
             with conn.cursor() as cursor:
-                cursor.execute("SELECT user_id FROM users WHERE session_id = %s", (session_id,))
+                cursor.execute("SELECT user_id FROM fi_users WHERE session_id = %s", (session_id,))
                 result = cursor.fetchone()
                 
                 if result:
@@ -211,7 +212,7 @@ class PostgresAdapter(DatabaseInterface):
                     user_id = result[0]
                     print(f"Found existing user {user_id} for session {session_id}")
                     cursor.execute(
-                        "UPDATE users SET last_active = %s WHERE user_id = %s",
+                        "UPDATE fi_users SET last_active = %s WHERE user_id = %s",
                         (datetime.now(), user_id)
                     )
                     conn.commit()
@@ -220,7 +221,7 @@ class PostgresAdapter(DatabaseInterface):
                     # Session doesn't exist, create new user
                     try:
                         cursor.execute(
-                            "INSERT INTO users (session_id, last_active, status) VALUES (%s, %s, %s) RETURNING user_id",
+                            "INSERT INTO fi_users (session_id, last_active, status) VALUES (%s, %s, %s) RETURNING user_id",
                             (session_id, datetime.now(), 'Idle')
                         )
                         user_id = cursor.fetchone()[0]
@@ -230,12 +231,12 @@ class PostgresAdapter(DatabaseInterface):
                     except psycopg2.errors.UniqueViolation:
                         # This might happen in rare race conditions
                         conn.rollback()
-                        cursor.execute("SELECT user_id FROM users WHERE session_id = %s", (session_id,))
+                        cursor.execute("SELECT user_id FROM fi_users WHERE session_id = %s", (session_id,))
                         result = cursor.fetchone()
                         if result:
                             user_id = result[0]
                             cursor.execute(
-                                "UPDATE users SET last_active = %s WHERE user_id = %s",
+                                "UPDATE fi_users SET last_active = %s WHERE user_id = %s",
                                 (datetime.now(), user_id)
                             )
                             conn.commit()
@@ -246,7 +247,7 @@ class PostgresAdapter(DatabaseInterface):
                             new_session_id = f"{session_id}-{str(uuid.uuid4())[:8]}"
                             print(f"Session collision, creating with new session_id: {new_session_id}")
                             cursor.execute(
-                                "INSERT INTO users (session_id, last_active, status) VALUES (%s, %s, %s) RETURNING user_id",
+                                "INSERT INTO fi_users (session_id, last_active, status) VALUES (%s, %s, %s) RETURNING user_id",
                                 (new_session_id, datetime.now(), 'Idle')
                             )
                             user_id = cursor.fetchone()[0]
@@ -273,13 +274,13 @@ class PostgresAdapter(DatabaseInterface):
         conn = self.connection_pool.getconn()
         try:
             with conn.cursor(cursor_factory=DictCursor) as cursor:
-                cursor.execute("SELECT * FROM users WHERE session_id = %s", (session_id,))
+                cursor.execute("SELECT * FROM fi_users WHERE session_id = %s", (session_id,))
                 row = cursor.fetchone()
                 
                 if row:
                     # Update last active time
                     cursor.execute(
-                        "UPDATE users SET last_active = %s WHERE user_id = %s",
+                        "UPDATE fi_users SET last_active = %s WHERE user_id = %s",
                         (datetime.now(), row['user_id'])
                     )
                     conn.commit()
@@ -289,7 +290,7 @@ class PostgresAdapter(DatabaseInterface):
                 # that matches part of this session_id (for generated fallback session IDs)
                 if '-' in session_id:
                     base_session_id = session_id.split('-')[0]
-                    cursor.execute("SELECT * FROM users WHERE session_id LIKE %s", (f"{base_session_id}%",))
+                    cursor.execute("SELECT * FROM fi_users WHERE session_id LIKE %s", (f"{base_session_id}%",))
                     row = cursor.fetchone()
                     if row:
                         return dict(row)
@@ -326,7 +327,7 @@ class PostgresAdapter(DatabaseInterface):
                     
                     with conn.cursor() as cursor:
                         cursor.execute(
-                            "UPDATE users SET status = %s, last_active = %s WHERE user_id = %s",
+                            "UPDATE fi_users SET status = %s, last_active = %s WHERE user_id = %s",
                             (status, datetime.now(), user_id)
                         )
                     conn.commit()
@@ -336,7 +337,7 @@ class PostgresAdapter(DatabaseInterface):
                     # User exists, update status
                     with conn.cursor() as cursor:
                         cursor.execute(
-                            "UPDATE users SET status = %s, last_active = %s WHERE user_id = %s",
+                            "UPDATE fi_users SET status = %s, last_active = %s WHERE user_id = %s",
                             (status, datetime.now(), user['user_id'])
                         )
                     conn.commit()
@@ -347,3 +348,5 @@ class PostgresAdapter(DatabaseInterface):
                 return False
         finally:
             self.connection_pool.putconn(conn)
+
+

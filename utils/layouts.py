@@ -25,6 +25,7 @@ def create_navigation_menu(current_page: str):
                     ui.label('Reportes')
 
 # https://github.com/zauberzeug/nicegui/discussions/1715 
+# icons library https://fonts.google.com/icons?icon.size=24&icon.color=%23e3e3e3
 
 def create_navigation_menu_2():
     with ui.header().classes('items-center justify-between'):
@@ -34,8 +35,10 @@ def create_navigation_menu_2():
             ui.button('Home', icon='home', on_click=lambda: ui.navigate.to('/home')).props('flat color=white')
             ui.button('Chat', icon='chat', on_click=lambda: ui.navigate.to('/chat')).props('flat color=white')
             ui.button('Reports', icon='analytics', on_click=lambda: ui.navigate.to('/reportes')).props('flat color=white')
+            ui.button('Admin', icon='analytics', on_click=lambda: ui.navigate.to('/admin')).props('flat color=white')
         with ui.row().classes('sm:hidden'):
             ui.button(icon='home', on_click=lambda: ui.navigate.to('/home')).props('flat color=white')
             ui.button(icon='chat', on_click=lambda: ui.navigate.to('/chat')).props('flat color=white')
             ui.button(icon='analytics', on_click=lambda: ui.navigate.to('/reportes')).props('flat color=white')
+            ui.button(icon='analytics', on_click=lambda: ui.navigate.to('/admin')).props('flat color=white')
         ui.button(icon='menu').props('flat color=white')
