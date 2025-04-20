@@ -28,16 +28,14 @@ def create_navigation_menu(current_page: str):
 
 def create_navigation_menu_2():
     with ui.header().classes('items-center justify-between'):
-        with ui.button(on_click=lambda: ui.navigate.to('/')):
+        with ui.button(on_click=lambda: ui.navigate.to('/home')):
             ui.avatar('favorite_border')
-        #with ui.link('/'):
-        #    ui.avatar('favorite_border')
         with ui.row().classes('max-sm:hidden'):
-            ui.button('Shop', icon='shopping_cart').props('flat color=white')
-            ui.button('Blog', icon='feed', on_click=lambda: ui.navigate.to('/reportes')).props('flat color=white')
-            ui.button('Contact', icon='perm_phone_msg').props('flat color=white')
+            ui.button('Home', icon='home', on_click=lambda: ui.navigate.to('/home')).props('flat color=white')
+            ui.button('Chat', icon='chat', on_click=lambda: ui.navigate.to('/chat')).props('flat color=white')
+            ui.button('Reports', icon='analytics', on_click=lambda: ui.navigate.to('/reportes')).props('flat color=white')
         with ui.row().classes('sm:hidden'):
-            ui.button(icon='shopping_cart').props('flat color=white')
-            ui.button(icon='feed', on_click=lambda: ui.navigate.to('/reportes')).props('flat color=white')
-            ui.button(icon='perm_phone_msg').props('flat color=white')
+            ui.button(icon='home', on_click=lambda: ui.navigate.to('/home')).props('flat color=white')
+            ui.button(icon='chat', on_click=lambda: ui.navigate.to('/chat')).props('flat color=white')
+            ui.button(icon='analytics', on_click=lambda: ui.navigate.to('/reportes')).props('flat color=white')
         ui.button(icon='menu').props('flat color=white')
