@@ -8,6 +8,7 @@ from utils.langflow_client import LangflowClient
 # Initialize components
 message_router = MessageRouter()
 db_adapter = PostgresAdapter()
+# Use the existing singleton instance
 langflow_client = LangflowClient()
 
 @ui.page('/chat')
