@@ -3,7 +3,7 @@ import functools
 from nicegui import ui
 # Use the specific imports from your snippet
 from utils.layouts import create_navigation_menu_2
-from utils.database import user_db
+
 
 # --- Dialog Definition ---
 # Define the dialog structure once. It will be populated dynamically.
