@@ -10,6 +10,8 @@ from utils.message_router import MessageRouter
 from pages.reportes import reportes_page
 # Import the chat page
 from pages.chat import chat_page
+from pages.home import home
+
 from utils.state import logout, update_user_status
 
 # Load environment variables if .env file exists
