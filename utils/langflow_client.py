@@ -25,7 +25,7 @@ class LangflowClient:
         self.connection_status = "unknown"
         
         if self.api_key and self.api_key != "your-api-key-here":
-            self.headers["Authorization"] = f"Bearer {self.api_key}"
+            self.headers["x-api-key"] = self.api_key
             
         print(f"Initialized Langflow client for: {self.base_url}")
         print(f"Using flow ID: {self.flow_id}")

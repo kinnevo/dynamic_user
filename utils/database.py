@@ -77,19 +77,41 @@ class PostgresAdapter(DatabaseInterface):
         conn = self.connection_pool.getconn()
         try:
             try:
-                # First check if user exists
+                # First check if user exists by user_id
                 with conn.cursor() as cursor:
-                    cursor.execute("SELECT user_id FROM users WHERE user_id = %s", (user_id,))
+                    cursor.execute("SELECT user_id, session_id FROM users WHERE user_id = %s", (user_id,))
                     result = cursor.fetchone()
                     
-                    # If user doesn't exist, create a new one
+                    # If user exists but has different session_id, use the found user's session_id
+                    if result and result[1] != session_id:
+                        print(f"User {user_id} found with different session_id, using existing session")
+                        session_id = result[1]
+                    
+                    # If user doesn't exist, check if session exists with different user_id
                     if not result:
-                        print(f"User {user_id} not found, creating new user for session {session_id}")
-                        cursor.execute(
-                            "INSERT INTO users (user_id, session_id, last_active, status) VALUES (%s, %s, %s, %s)",
-                            (user_id, session_id, datetime.now(), 'Active')
-                        )
-                        conn.commit()
+                        cursor.execute("SELECT user_id FROM users WHERE session_id = %s", (session_id,))
+                        session_result = cursor.fetchone()
+                        
+                        if session_result:
+                            # Session exists, use that user_id
+                            print(f"Session {session_id} exists with user_id {session_result[0]}, using existing user")
+                            user_id = session_result[0]
+                        else:
+                            # Neither user nor session exists, create new user
+                            print(f"Creating new user for session {session_id}")
+                            cursor.execute(
+                                "INSERT INTO users (session_id, last_active, status) VALUES (%s, %s, %s) RETURNING user_id",
+                                (session_id, datetime.now(), 'Active')
+                            )
+                            user_id = cursor.fetchone()[0]
+                            conn.commit()
+                    
+                    # Update last_active time
+                    cursor.execute(
+                        "UPDATE users SET last_active = %s WHERE user_id = %s",
+                        (datetime.now(), user_id)
+                    )
+                    conn.commit()
                 
                 # Now save the message
                 with conn.cursor() as cursor:
@@ -169,53 +191,72 @@ class PostgresAdapter(DatabaseInterface):
     
     def create_user(self, session_id: str) -> int:
         """
-        Create a new user for a session
+        Create a new user for a session or get existing user
         
         Args:
             session_id: Unique session identifier
             
         Returns:
-            user_id: ID of the created user
+            user_id: ID of the created or existing user
         """
         conn = self.connection_pool.getconn()
         try:
-            try:
-                with conn.cursor() as cursor:
+            # First check if the session already exists
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT user_id FROM users WHERE session_id = %s", (session_id,))
+                result = cursor.fetchone()
+                
+                if result:
+                    # Session exists, update last_active time
+                    user_id = result[0]
+                    print(f"Found existing user {user_id} for session {session_id}")
                     cursor.execute(
-                        "INSERT INTO users (session_id, last_active, status) VALUES (%s, %s, %s) RETURNING user_id",
-                        (session_id, datetime.now(), 'Idle')
+                        "UPDATE users SET last_active = %s WHERE user_id = %s",
+                        (datetime.now(), user_id)
                     )
-                    user_id = cursor.fetchone()[0]
-                conn.commit()
-                return user_id
-            except psycopg2.errors.UniqueViolation:
-                # User already exists, get the ID
-                conn.rollback()
-                with conn.cursor() as cursor:
-                    cursor.execute("SELECT user_id FROM users WHERE session_id = %s", (session_id,))
-                    result = cursor.fetchone()
-                    if result:
-                        user_id = result[0]
-                        # Update last_active time
-                        cursor.execute(
-                            "UPDATE users SET last_active = %s WHERE user_id = %s",
-                            (datetime.now(), user_id)
-                        )
-                        conn.commit()
-                        return user_id
-                    else:
-                        # This should not happen, but just in case
+                    conn.commit()
+                    return user_id
+                else:
+                    # Session doesn't exist, create new user
+                    try:
                         cursor.execute(
                             "INSERT INTO users (session_id, last_active, status) VALUES (%s, %s, %s) RETURNING user_id",
                             (session_id, datetime.now(), 'Idle')
                         )
                         user_id = cursor.fetchone()[0]
+                        print(f"Created new user {user_id} for session {session_id}")
                         conn.commit()
                         return user_id
-            except Exception as e:
-                print(f"Error creating user: {e}")
+                    except psycopg2.errors.UniqueViolation:
+                        # This might happen in rare race conditions
+                        conn.rollback()
+                        cursor.execute("SELECT user_id FROM users WHERE session_id = %s", (session_id,))
+                        result = cursor.fetchone()
+                        if result:
+                            user_id = result[0]
+                            cursor.execute(
+                                "UPDATE users SET last_active = %s WHERE user_id = %s",
+                                (datetime.now(), user_id)
+                            )
+                            conn.commit()
+                            return user_id
+                        else:
+                            # Generate a new unique session_id as fallback
+                            import uuid
+                            new_session_id = f"{session_id}-{str(uuid.uuid4())[:8]}"
+                            print(f"Session collision, creating with new session_id: {new_session_id}")
+                            cursor.execute(
+                                "INSERT INTO users (session_id, last_active, status) VALUES (%s, %s, %s) RETURNING user_id",
+                                (new_session_id, datetime.now(), 'Idle')
+                            )
+                            user_id = cursor.fetchone()[0]
+                            conn.commit()
+                            return user_id
+        except Exception as e:
+            print(f"Error creating user: {e}")
+            if 'conn' in locals():
                 conn.rollback()
-                return -1
+            return -1
         finally:
             self.connection_pool.putconn(conn)
     
@@ -236,8 +277,27 @@ class PostgresAdapter(DatabaseInterface):
                 row = cursor.fetchone()
                 
                 if row:
+                    # Update last active time
+                    cursor.execute(
+                        "UPDATE users SET last_active = %s WHERE user_id = %s",
+                        (datetime.now(), row['user_id'])
+                    )
+                    conn.commit()
                     return dict(row)
+                
+                # If no user is found with this session_id, check if there's a session
+                # that matches part of this session_id (for generated fallback session IDs)
+                if '-' in session_id:
+                    base_session_id = session_id.split('-')[0]
+                    cursor.execute("SELECT * FROM users WHERE session_id LIKE %s", (f"{base_session_id}%",))
+                    row = cursor.fetchone()
+                    if row:
+                        return dict(row)
+                        
                 return None
+        except Exception as e:
+            print(f"Error getting user: {e}")
+            return None
         finally:
             self.connection_pool.putconn(conn)
     
@@ -254,13 +314,36 @@ class PostgresAdapter(DatabaseInterface):
         """
         conn = self.connection_pool.getconn()
         try:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    "UPDATE users SET status = %s, last_active = %s WHERE session_id = %s",
-                    (status, datetime.now(), session_id)
-                )
-                success = cursor.rowcount > 0
-            conn.commit()
-            return success
+            try:
+                # First check if the user exists
+                user = self.get_user(session_id)
+                
+                if not user:
+                    # User doesn't exist, create one
+                    user_id = self.create_user(session_id)
+                    if user_id == -1:
+                        return False
+                    
+                    with conn.cursor() as cursor:
+                        cursor.execute(
+                            "UPDATE users SET status = %s, last_active = %s WHERE user_id = %s",
+                            (status, datetime.now(), user_id)
+                        )
+                    conn.commit()
+                    return True
+                    
+                else:
+                    # User exists, update status
+                    with conn.cursor() as cursor:
+                        cursor.execute(
+                            "UPDATE users SET status = %s, last_active = %s WHERE user_id = %s",
+                            (status, datetime.now(), user['user_id'])
+                        )
+                    conn.commit()
+                    return True
+            except Exception as e:
+                print(f"Error updating user status: {e}")
+                conn.rollback()
+                return False
         finally:
             self.connection_pool.putconn(conn)
