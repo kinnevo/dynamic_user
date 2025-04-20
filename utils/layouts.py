@@ -30,7 +30,7 @@ def create_navigation_menu(current_page: str):
 def create_navigation_menu_2():
     with ui.header().classes('items-center justify-between'):
         with ui.button(on_click=lambda: ui.navigate.to('/home')):
-            ui.avatar('favorite_border')
+            ui.image('static/favicon.png').classes('h-8 w-8')
         with ui.row().classes('max-sm:hidden'):
             ui.button('Home', icon='home', on_click=lambda: ui.navigate.to('/home')).props('flat color=white')
             ui.button('Chat', icon='chat', on_click=lambda: ui.navigate.to('/chat')).props('flat color=white')
