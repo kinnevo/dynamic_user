@@ -64,3 +64,13 @@ deactivate
 - Implemented singleton pattern for LangflowClient to prevent multiple API connections
 - Added foreign key constraints for data integrity
 - Improved session handling and connection pooling
+- Updated application navigation structure with home page as landing screen
+- Enhanced navigation menu with consistent access to all pages
+
+## Application Structure
+
+- **Home Page** (`/home`): Landing page with application introduction and "Get Started" button
+- **Chat Page** (`/chat`): Interactive chat interface with Langflow API integration
+- **Reports Page** (`/reportes`): Analytics and administration features
+
+The navigation flow starts at the home page, with users being directed to the chat interface when they click the main call-to-action button.
