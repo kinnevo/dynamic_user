@@ -4,6 +4,9 @@ from nicegui import ui
 # Use the specific imports from your snippet
 from utils.layouts import create_navigation_menu_2
 
+# Database connection
+from utils.database import PostgresAdapter
+user_db = PostgresAdapter()
 
 # --- Dialog Definition ---
 # Define the dialog structure once. It will be populated dynamically.
