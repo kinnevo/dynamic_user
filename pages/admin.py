@@ -21,7 +21,7 @@ def show_user_details(user_data):
         return
     
     # Create a new dialog each time
-    with ui.dialog() as dialog, ui.card().classes('w-[50vw] max-w-[75vw]'):
+    with ui.dialog() as dialog, ui.card().classes('w-[50vw] max-w-[75vw]').style('max-width: 75vw !important'):
         # Header
         with ui.row().classes('w-full bg-primary text-white p-4'):
             ui.label(f"Details for User: {user_id}").classes('text-h6')
