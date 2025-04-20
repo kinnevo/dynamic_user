@@ -9,6 +9,7 @@ class MessageRouter:
     Handles message processing, storage, and response extraction
     """
     def __init__(self):
+        # Use the existing singleton instance
         self.langflow_client = LangflowClient()
         self.db_adapter = PostgresAdapter()
     

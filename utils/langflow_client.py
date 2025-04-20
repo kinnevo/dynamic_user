@@ -10,8 +10,22 @@ load_dotenv()
 class LangflowClient:
     """
     Client for interacting with Langflow API
+    
+    Implemented as a singleton to prevent multiple initializations.
     """
+    _instance = None
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(LangflowClient, cls).__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
+    
     def __init__(self):
+        # Only initialize once
+        if self._initialized:
+            return
+            
         self.base_url = os.getenv("LANGFLOW_API_URL", "http://localhost:7860")
         # Remove trailing slash if present
         if self.base_url.endswith('/'):
@@ -32,6 +46,8 @@ class LangflowClient:
         
         # Run a background health check
         self.check_connection()
+        
+        self._initialized = True
         
     def check_connection(self) -> Tuple[bool, str]:
         """

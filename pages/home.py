@@ -1,8 +1,36 @@
 from nicegui import ui, app
+import uuid
+from utils.state import logout, update_user_status
+from utils.database import PostgresAdapter
+from utils.layouts import create_navigation_menu_2
 
+# Initialize database adapter
+db_adapter = PostgresAdapter()
+
+# Initialize visit counter cookie
+def get_visit_count() -> int:
+    """Get visit count and initialize session if needed"""
+    if ('visits' in app.storage.browser and logout == True) or ('visits' not in app.storage.browser):
+        # Initialize new session
+        app.storage.browser['visits'] = 0
+        app.storage.browser['session_id'] = str(uuid.uuid4())
+        app.storage.browser['user_id'] = db_adapter.create_user(app.storage.browser['session_id'])
+        
+        # Set initial user status
+        db_adapter.update_user_status(app.storage.browser['session_id'], "Idle")
+    
+    app.storage.browser['visits'] += 1
+    return app.storage.browser['visits']
 
 @ui.page('/home')
 def home():
+    # Initialize user visit count
+    visit_count = get_visit_count()
+    
+    # Optional: If you want to display a small header with user info
+    with ui.row().classes('w-full justify-end p-2'):
+        ui.label(f'Visitas: {visit_count}').classes('text-sm')
+    
     with ui.column().classes('w-full items-center'):
         ui.label('Resuelve desafíos reales con FastInnovation').classes('text-h3 q-mb-md')
         ui.label('Disfruta el arte de solucionar problemas cotidianos').classes('text-h5 q-mb-md')

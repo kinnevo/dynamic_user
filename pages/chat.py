@@ -1,19 +1,20 @@
 from nicegui import ui, app
 import uuid
 from utils.message_router import MessageRouter
-from utils.layouts import create_navigation_menu
+from utils.layouts import create_navigation_menu_2
 from utils.database import PostgresAdapter
 from utils.langflow_client import LangflowClient
 
 # Initialize components
 message_router = MessageRouter()
 db_adapter = PostgresAdapter()
+# Use the existing singleton instance
 langflow_client = LangflowClient()
 
 @ui.page('/chat')
 async def chat_page():
     """Chat interface for Langflow interaction"""
-    create_navigation_menu('/chat')
+    create_navigation_menu_2()
     
     with ui.header().classes('items-center justify-between'):
         # Left side with title
