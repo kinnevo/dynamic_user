@@ -45,7 +45,8 @@ class UserDB:
                     );
                     CREATE TABLE IF NOT EXISTS fi_users (
                         user_id SERIAL PRIMARY KEY,
-                        session_id VARCHAR(255) NOT NULL
+                        session_id VARCHAR(255) NOT NULL,
+                        logged BOOLEAN NOT NULL DEFAULT FALSE
                     );
                 ''')
             conn.commit()
@@ -124,19 +125,20 @@ def get_conversation(session_id: str) -> Optional[Dict[str, Any]]:
     finally:
         user_db.connection_pool.putconn(conn)
 
-def create_user(session_id: str) -> int:
+def create_user(session_id: str, logged: bool = True) -> int:
     """Create a new user and return the generated user_id."""
     conn = user_db.connection_pool.getconn()
     try:
         with conn.cursor() as cursor:
             cursor.execute('''
-                INSERT INTO fi_users (session_id)
-                VALUES (%s)
+                INSERT INTO fi_users (session_id, logged)
+                VALUES (%s, %s)
                 RETURNING user_id
-            ''', (session_id,))
+            ''', (session_id, logged))
             user_id = cursor.fetchone()[0]
             conn.commit()
             return user_id
+        
     finally:
         user_db.connection_pool.putconn(conn)
 

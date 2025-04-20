@@ -1,12 +1,9 @@
-# Global state variables
-from nicegui import app
+# Global state variable
+logout = False
 
-def init_global_state():
-    if 'logout' not in app.storage.global_:
-        app.storage.global_['logout'] = False
+def get_user_logout_state():
+    return logout
 
-def get_logout_state():
-    return app.storage.global_.get('logout', False)
-
-def set_logout_state(value: bool):
-    app.storage.global_['logout'] = value
+def set_user_logout_state(value: bool):
+    global logout
+    logout = value
