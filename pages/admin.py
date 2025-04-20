@@ -16,13 +16,14 @@ with ui.dialog() as user_dialog, ui.card().tight():
 # --- Dialog Handler Function ---
 def show_user_details(user_data):
     """Populates and opens the user detail dialog."""
+    print("DEBUG: show_user_details called with data:", user_data)  # Add debug print
     dialog_title.text = f"Details for User: {user_data.get('user_id', 'N/A')}"
     dialog_content.clear()
     with dialog_content:
         ui.label(f"User ID: {user_data.get('user_id', 'N/A')}")
         ui.label(f"Session ID: {user_data.get('session_id', 'N/A')}")
         ui.label(f"Logged Status: {user_data.get('logged', 'N/A')}")
-        # Optional: Add database calls here if needed to fetch more details
+    print("DEBUG: Opening dialog")  # Add debug print
     user_dialog.open()
 
 # --- Main Page Definition ---
@@ -58,10 +59,23 @@ def page_admin():
             'flat bordered separator=cell pagination-rows-per-page-options=[10,25,50,100]'
         )
 
-        # --- Table Slot for Clickable User ID ---
+        # First, expose the function to the frontend
+        table.on('show_details', show_user_details)
+
+        # Then modify the slot template
         table.add_slot('body-cell-user_id', r'''
-            <td :props="props">
-                <a href="#" @click="() => { console.log('props:', props); console.log('row:', props.row); $parent.show_user_details(props.row) }">{{props.row.user_id}}</a>
+            <td>
+                <q-btn flat
+                    :label="props.row.user_id"
+                    color="primary"
+                    @click="() => $q.dialog({
+                        title: 'User Information',
+                        message: `<p><b>User ID:</b> ${props.row.user_id}</p>
+                                 <p><b>Session ID:</b> ${props.row.session_id}</p>
+                                 <p><b>Logged:</b> ${props.row.logged}</p>`,
+                        html: true
+                    })"
+                />
             </td>
         ''')
         
@@ -105,6 +119,13 @@ def page_admin():
                     except Exception as pool_e:
                         print(f"ERROR putting connection back to pool: {pool_e}")
 
+        # Then bind the JavaScript function to call our Python function
+        ui.run_javascript('''
+            window.handle_user_click = function(row) {
+                console.log('Clicked row:', row);
+                // Call Python function here
+            }
+        ''')
 
         # --- Initial Data Load ---
         # Populate the table when the page is first loaded
