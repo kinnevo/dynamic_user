@@ -4,6 +4,7 @@ import uuid
 from utils.layouts import create_navigation_menu, create_navigation_menu_2
 from utils.database import create_user
 from pages.reportes import reportes_page
+from pages.admin import page_admin
 from utils.state import  get_user_logout_state, set_user_logout_state
 
 
