@@ -25,6 +25,7 @@ def on_startup():
     # Initialize database connection
     db_adapter._init_db()
 
+
 @app.on_shutdown
 def on_shutdown():
     """Application shutdown handler"""
