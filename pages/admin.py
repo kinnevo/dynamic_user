@@ -8,26 +8,74 @@ from utils.layouts import create_navigation_menu_2
 from utils.database import PostgresAdapter
 user_db = PostgresAdapter()
 
-# --- Dialog Definition ---
-# Define the dialog structure once. It will be populated dynamically.
-with ui.dialog() as user_dialog, ui.card().tight():
-    dialog_title = ui.label('User Details').classes('text-h6 p-4 bg-primary text-white')
-    with ui.column().classes('p-4'):
-        dialog_content = ui.column()
-    ui.button('Close', on_click=user_dialog.close).classes('m-4 self-end')
-
 # --- Dialog Handler Function ---
 def show_user_details(user_data):
-    """Populates and opens the user detail dialog."""
-    print("DEBUG: show_user_details called with data:", user_data)  # Add debug print
-    dialog_title.text = f"Details for User: {user_data.get('user_id', 'N/A')}"
-    dialog_content.clear()
-    with dialog_content:
-        ui.label(f"User ID: {user_data.get('user_id', 'N/A')}")
-        ui.label(f"Session ID: {user_data.get('session_id', 'N/A')}")
-        ui.label(f"Logged Status: {user_data.get('logged', 'N/A')}")
-    print("DEBUG: Opening dialog")  # Add debug print
-    user_dialog.open()
+    """Creates and shows a dialog with user details and conversation history."""
+    # Extract user data
+    if isinstance(user_data, dict):
+        session_id = user_data.get('session_id', 'N/A')
+        user_id = user_data.get('user_id', 'N/A')
+        logged = user_data.get('logged', 'N/A')
+    else:
+        # Unexpected data format
+        return
+    
+    # Create a new dialog each time
+    with ui.dialog() as dialog, ui.card().classes('w-4/5 max-w-5xl'):
+        # Header
+        with ui.row().classes('w-full bg-primary text-white p-4'):
+            ui.label(f"Details for User: {user_id}").classes('text-h6')
+        
+        # User details section
+        with ui.column().classes('p-4'):
+            ui.label(f"User ID: {user_id}")
+            ui.label(f"Session ID: {session_id}")
+            ui.label(f"Logged Status: {logged}")
+        
+        # Messages section header
+        ui.label('Recent Conversation').classes('text-h6 p-4 pt-0')
+        
+        # Messages container
+        with ui.column().classes('w-full h-[500px] overflow-y-auto p-4 gap-2 border rounded mx-4'):
+            # Fetch messages
+            conn = None
+            try:
+                conn = user_db.connection_pool.getconn()
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT role, content, timestamp FROM fi_messages WHERE session_id = %s ORDER BY timestamp DESC LIMIT 20",
+                        (session_id,)
+                    )
+                    messages = cursor.fetchall()
+                    messages.reverse()  # Show oldest messages first
+                    
+                    if not messages:
+                        ui.label("No messages found for this session").classes('text-gray-500 italic')
+                    
+                    for role, content, timestamp in messages:
+                        time_str = timestamp.strftime("%H:%M:%S") if timestamp else "Unknown time"
+                        if role == 'user':
+                            with ui.element('div').classes('self-end bg-blue-500 text-white p-3 rounded-lg max-w-[80%]'):
+                                ui.label(f"{time_str}").classes('text-xs opacity-70 mb-1')
+                                ui.markdown(content)
+                        else:
+                            with ui.element('div').classes('self-start bg-gray-200 p-3 rounded-lg max-w-[80%]'):
+                                ui.label(f"{time_str}").classes('text-xs opacity-70 mb-1') 
+                                ui.markdown(content)
+            except Exception as e:
+                ui.label(f"Error fetching messages: {str(e)}").classes('text-red-500')
+            finally:
+                if conn:
+                    try:
+                        user_db.connection_pool.putconn(conn)
+                    except Exception:
+                        pass
+        
+        # Footer with close button
+        with ui.row().classes('w-full justify-end p-4'):
+            ui.button('Close', on_click=dialog.close).props('flat')
+    
+    dialog.open()
 
 # --- Main Page Definition ---
 @ui.page('/admin')
@@ -41,7 +89,9 @@ def page_admin():
         ui.label('FastInnovation Admin').classes('text-h4 q-mb-md')
 
         # --- Controls Row ---
-        with ui.row().classes('w-full justify-end items-center mb-4'):
+        with ui.row().classes('w-full justify-between items-center mb-4'):
+            # Help text
+            ui.label('Click on any row to view detailed user information and conversation history').classes('text-sm text-gray-600')
             # Refresh button - Use on_click method
             refresh_button = ui.button('Refresh', icon='refresh', on_click=lambda: update_table()).props('flat color=primary')
 
@@ -53,40 +103,46 @@ def page_admin():
             {'name': 'logged', 'field': 'logged', 'label': 'Logged Status', 'align': 'center', 'sortable': True}
         ]
 
-        # Create the table, defaulting to 25 rows per page
+        # Create a standard NiceGUI table
         table = ui.table(
             columns=columns,
             rows=[],
-            pagination={'rowsPerPage': 25, 'page': 1} # Default to 25 rows
-        ).classes('w-full').props(
-            'flat bordered separator=cell pagination-rows-per-page-options=[10,25,50,100]'
-        )
+            row_key='user_id'  # Set row key for unique identification
+        ).classes('w-full')
+        
+        # Add Quasar-specific props
+        table.props('flat bordered dense row-click pagination')
 
-        # First, expose the function to the frontend
-        table.on('show_details', show_user_details)
-
-        # Then modify the slot template
-        table.add_slot('body-cell-user_id', r'''
-            <td>
-                <q-btn flat
-                    :label="props.row.user_id"
-                    color="primary"
-                    @click="() => $q.dialog({
-                        title: 'User Information',
-                        message: `<p><b>User ID:</b> ${props.row.user_id}</p>
-                                 <p><b>Session ID:</b> ${props.row.session_id}</p>
-                                 <p><b>Logged:</b> ${props.row.logged}</p>`,
-                        html: true
-                    })"
-                />
-            </td>
+        # Add row-click event handler
+        def handle_row_click(e):
+            # The event format is: [event, rowData, rowIndex]
+            if isinstance(e.args, list) and len(e.args) >= 2:
+                # The row data is the second element (index 1) in the args list
+                row_data = e.args[1]  
+                show_user_details(row_data)
+            else:
+                ui.notify("Could not retrieve row data", type="negative")
+                
+        table.on('row-click', handle_row_click)
+        
+        # Add CSS classes to make rows appear clickable
+        ui.add_head_html('''
+        <style>
+            .q-table tbody tr {
+                cursor: pointer;
+                transition: background-color 0.2s;
+            }
+            .q-table tbody tr:hover {
+                background-color: rgba(59, 130, 246, 0.1);
+            }
+        </style>
         ''')
         
         # --- Data Update Function (Using your provided logic) ---
         def update_table():
             """Fetches user data from the database and updates the table rows."""
             conn = None # Initialize conn to None for the finally block
-            print("DEBUG: update_table() called") # Optional debug
+            # Fetch user data from database
             try:
                 # Use your database connection pool
                 conn = user_db.connection_pool.getconn()
@@ -94,7 +150,7 @@ def page_admin():
                 # Use your SQL query
                 cursor.execute("SELECT user_id, session_id, logged FROM fi_users ORDER BY user_id") # Added ORDER BY
                 rows = cursor.fetchall()
-                print(f"DEBUG: Fetched {len(rows)} rows from database.") # Your debug print
+                # Data retrieved successfully
 
                 table_rows = []
                 for row_tuple in rows: # Iterate through the tuples from fetchall
@@ -105,13 +161,17 @@ def page_admin():
                         'session_id': row_tuple[1],
                         'logged': 'Yes' if row_tuple[2] else 'No' # Convert boolean
                     })
-                print(f"DEBUG: Processed {len(table_rows)} rows for NiceGUI table.") # Your debug print
+                # Process complete
 
                 # Update the table component's rows
                 table.rows = table_rows
+                
+                # Show subtle notification
+                if len(table_rows) > 0:
+                    ui.notify(f"Loaded {len(table_rows)} users", type='positive', position='bottom-right', timeout=1500)
 
             except Exception as e:
-                print(f"ERROR in update_table: {e}") # Log error to console
+                # Log the error and notify user
                 # Use your notification style
                 ui.notify(f'Error loading users: {str(e)}', type='negative', position='top-right')
             finally:
@@ -122,13 +182,7 @@ def page_admin():
                     except Exception as pool_e:
                         print(f"ERROR putting connection back to pool: {pool_e}")
 
-        # Then bind the JavaScript function to call our Python function
-        ui.run_javascript('''
-            window.handle_user_click = function(row) {
-                console.log('Clicked row:', row);
-                // Call Python function here
-            }
-        ''')
+        # No need for another helpful message, moved to above the table
 
         # --- Initial Data Load ---
         # Populate the table when the page is first loaded
