@@ -107,11 +107,13 @@ def page_admin():
         table = ui.table(
             columns=columns,
             rows=[],
+            pagination={'rowsPerPage': 25, 'page': 1}, 
             row_key='user_id'  # Set row key for unique identification
         ).classes('w-full')
         
         # Add Quasar-specific props
-        table.props('flat bordered dense row-click pagination')
+        #table.props('flat bordered dense row-click pagination')
+        table.props('flat bordered separator=cell pagination-rows-per-page-options=[10,25,50,100]')
 
         # Add row-click event handler
         def handle_row_click(e):
