@@ -112,7 +112,8 @@ def page_admin():
         ).classes('w-full')
         
         # Add Quasar-specific props
-        table.props('flat bordered dense row-click pagination')
+        #table.props('flat bordered dense row-click pagination')
+        table.props('flat bordered separator=cell pagination-rows-per-page-options=[10,25,50,100]')
 
         # Add row-click event handler
         def handle_row_click(e):
