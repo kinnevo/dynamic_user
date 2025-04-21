@@ -1,6 +1,6 @@
 from nicegui import ui, app
 import uuid
-from utils.state import logout, update_user_status
+from utils.state import logout, update_user_status, set_user_logout_state
 from utils.database import PostgresAdapter
 from utils.layouts import create_navigation_menu_2
 
@@ -10,7 +10,24 @@ db_adapter = PostgresAdapter()
 # Initialize visit counter cookie
 def get_visit_count() -> int:
     """Get visit count and initialize session if needed"""
-    if ('visits' in app.storage.browser and logout == True) or ('visits' not in app.storage.browser):
+    # Check if we should create a new session
+    should_reset = ('visits' in app.storage.browser and logout == True) or ('visits' not in app.storage.browser)
+    
+    # Get the URL parameters using JavaScript
+    def check_for_new_session():
+        result = ui.run_javascript("""
+            const urlParams = new URLSearchParams(window.location.search);
+            return urlParams.get('newSession') === 'true';
+        """)
+        return result
+    
+    # Force reset if we have the newSession parameter
+    if ui.run_javascript("return window.location.search.includes('newSession=true')"):
+        should_reset = True
+        # Reset the logout flag
+        set_user_logout_state(False)
+    
+    if should_reset:
         # Initialize new session
         app.storage.browser['visits'] = 0
         app.storage.browser['session_id'] = str(uuid.uuid4())
@@ -24,7 +41,7 @@ def get_visit_count() -> int:
 
 @ui.page('/home')
 def home():
-    # Initialize user visit count
+    # Initialize user visit count - this now checks URL parameters internally
     visit_count = get_visit_count()
     
     # Optional: If you want to display a small header with user info

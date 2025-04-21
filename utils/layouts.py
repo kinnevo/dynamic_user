@@ -35,12 +35,10 @@ def clearSessionAndRedirect():
         localStorage.clear();
         sessionStorage.clear();
         
-        // Show notification (optional)
-        // We'll handle this with ui.notify after redirect
-        
-        // Redirect to home page
-        window.location.href = '/';
+        // Redirect to home page with special parameter
+        window.location.href = '/home?newSession=true';
     """)
+
     
     # This notification might not show since we're redirecting
     ui.notify('Sesión eliminada correctamente')
