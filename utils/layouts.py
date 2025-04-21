@@ -26,10 +26,24 @@ def create_navigation_menu(current_page: str):
                     ui.label('Reportes')
 
 def clearSessionAndRedirect():
-    app.storage.browser.clear()  # Clear all browser storage
-    set_user_logout_state(True)  # Use the global state setter
+    # Setting the logout state is fine as it's server-side
+    set_user_logout_state(True)
+    
+    # Instead of trying to clear storage directly, use client-side JavaScript
+    ui.run_javascript("""
+        // Clear all browser storage
+        localStorage.clear();
+        sessionStorage.clear();
+        
+        // Show notification (optional)
+        // We'll handle this with ui.notify after redirect
+        
+        // Redirect to home page
+        window.location.href = '/';
+    """)
+    
+    # This notification might not show since we're redirecting
     ui.notify('Sesión eliminada correctamente')
-    ui.navigate.to('/')  # Redirect to home page
 
 def create_navigation_menu_2():
     with ui.header().classes('items-center justify-between'):
