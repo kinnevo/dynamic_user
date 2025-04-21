@@ -107,6 +107,7 @@ def page_admin():
         table = ui.table(
             columns=columns,
             rows=[],
+            pagination={'rowsPerPage': 25, 'page': 1}, 
             row_key='user_id'  # Set row key for unique identification
         ).classes('w-full')
         
