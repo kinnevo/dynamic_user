@@ -26,7 +26,7 @@ class LangflowClient:
         if self._initialized:
             return
             
-        self.base_url = os.getenv("LANGFLOW_API_URL", "http://localhost:7860")
+        self.base_url = os.getenv("LANGFLOW_API_URL")
         # Remove trailing slash if present
         if self.base_url.endswith('/'):
             self.base_url = self.base_url[:-1]
