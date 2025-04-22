@@ -1,6 +1,7 @@
 import os
 from datetime import datetime
 import pytz
+import openai
 from typing import Optional, Dict, Any, List
 from nicegui import app
 import psycopg2
@@ -14,9 +15,12 @@ sf_timezone = pytz.timezone('America/Los_Angeles')
 
 def get_sf_time():
     """Get current time in San Francisco timezone"""
+    # Create a timezone-aware UTC datetime and then convert it to SF timezone
     return datetime.now(pytz.utc).astimezone(sf_timezone)
 
+# Configure OpenAI API
 load_dotenv()
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 class PostgresAdapter(DatabaseInterface):
     def __init__(self):
@@ -64,6 +68,14 @@ class PostgresAdapter(DatabaseInterface):
                         role TEXT NOT NULL,
                         timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         FOREIGN KEY (user_id) REFERENCES fi_users(user_id)
+                    );
+                    
+                    CREATE TABLE IF NOT EXISTS fi_summary (
+                        summary_id SERIAL PRIMARY KEY,
+                        session_id TEXT NOT NULL,
+                        user_id INTEGER NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        summary TEXT NOT NULL
                     );
                 ''')
             conn.commit()
@@ -216,12 +228,12 @@ class PostgresAdapter(DatabaseInterface):
                 result = cursor.fetchone()
                 
                 if result:
-                    # Session exists, update last_active time
+                    # Session exists, update last_active time with SF timezone
                     user_id = result[0]
                     print(f"Found existing user {user_id} for session {session_id}")
                     cursor.execute(
                         "UPDATE fi_users SET last_active = %s WHERE user_id = %s",
-                        (datetime.now(), user_id)
+                        (get_sf_time(), user_id)
                     )
                     conn.commit()
                     return user_id
@@ -359,7 +371,7 @@ class PostgresAdapter(DatabaseInterface):
             
     def get_conversations_by_date_and_users(self, start_date: str, start_hour: int, 
                                            end_date: str, end_hour: int, 
-                                           user_ids: list = None) -> List[Dict[str, Any]]:
+                                           user_ids: list = None, min_messages: int = 1) -> List[Dict[str, Any]]:
         """
         Fetch conversations based on date range and user selection
         
@@ -369,6 +381,7 @@ class PostgresAdapter(DatabaseInterface):
             end_date: End date in format 'YYYY-MM-DD'
             end_hour: End hour (0-23)
             user_ids: List of user IDs to filter by, or None for all users
+            min_messages: Minimum number of messages for a conversation to be included (default: 1)
             
         Returns:
             List of conversation data grouped by session_id
@@ -380,15 +393,20 @@ class PostgresAdapter(DatabaseInterface):
                 # Parse input dates and convert to SF timezone
                 try:
                     # Convert string dates to proper datetime objects with SF timezone
+                    # We need to create naive datetimes first, then make them timezone-aware
                     start_dt = datetime.strptime(f"{start_date} {start_hour:02d}:00:00", "%Y-%m-%d %H:%M:%S")
+                    # Use localize to add timezone info without conversion
                     start_dt = sf_timezone.localize(start_dt)
                     
                     end_dt = datetime.strptime(f"{end_date} {end_hour:02d}:59:59", "%Y-%m-%d %H:%M:%S") 
                     end_dt = sf_timezone.localize(end_dt)
                     
-                    # Format for database query
-                    start_datetime = start_dt.strftime("%Y-%m-%d %H:%M:%S")
-                    end_datetime = end_dt.strftime("%Y-%m-%d %H:%M:%S")
+                    # Format for database query - make sure it's in the correct timezone format
+                    # We'll use ISO format which includes timezone information
+                    start_datetime = start_dt.strftime("%Y-%m-%d %H:%M:%S %z")
+                    end_datetime = end_dt.strftime("%Y-%m-%d %H:%M:%S %z")
+                    
+                    print(f"Using timezone-aware dates: {start_datetime} to {end_datetime}")
                 except ValueError as e:
                     print(f"Error parsing dates: {e}")
                     # Fallback to simple string construction
@@ -467,12 +485,179 @@ class PostgresAdapter(DatabaseInterface):
                         'timestamp': row['timestamp']
                     })
                 
-                # Convert dictionary to list
-                return list(conversations.values())
+                # Filter out conversations with fewer than min_messages
+                filtered_conversations = []
+                for conv in conversations.values():
+                    if conv['message_count'] >= min_messages:
+                        filtered_conversations.append(conv)
+                    else:
+                        print(f"Skipping conversation {conv['session_id']} with only {conv['message_count']} message(s)")
+                
+                return filtered_conversations
                 
         except Exception as e:
             print(f"Error fetching conversations: {e}")
             return []
+        finally:
+            self.connection_pool.putconn(conn)
+    
+    def create_conversation_summary(self, session_id: str, user_id: int) -> Optional[str]:
+        """
+        Create a summary for a conversation using GPT-4o
+        
+        Args:
+            session_id: The session ID of the conversation
+            user_id: The user ID associated with the conversation
+            
+        Returns:
+            Summary text if successful, None if failed
+        """
+        conn = self.connection_pool.getconn()
+        try:
+            # First check if summary already exists
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT summary_id FROM fi_summary WHERE session_id = %s", (session_id,))
+                if cursor.fetchone():
+                    print(f"Summary already exists for session {session_id}")
+                    return None
+                
+                # Check if there are any messages in this conversation
+                cursor.execute("SELECT COUNT(*) FROM fi_messages WHERE session_id = %s", (session_id,))
+                message_count = cursor.fetchone()[0]
+                if message_count == 0:
+                    print(f"Skipping summary generation for session {session_id}: No messages found")
+                    return None
+            
+            # Get all messages for this session
+            messages_text = self.get_messages_for_summary(session_id)
+            if not messages_text:
+                print(f"No messages found for session {session_id}")
+                return None
+            
+            # Generate summary using GPT-4o
+            try:
+                summary = self.generate_summary_with_gpt4o(messages_text)
+                
+                # Store summary in database
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        "INSERT INTO fi_summary (session_id, user_id, created_at, summary) VALUES (%s, %s, %s, %s) RETURNING summary_id",
+                        (session_id, user_id, get_sf_time(), summary)
+                    )
+                    summary_id = cursor.fetchone()[0]
+                conn.commit()
+                
+                return summary
+            except Exception as e:
+                print(f"Error generating summary: {e}")
+                return None
+                
+        except Exception as e:
+            print(f"Error creating summary: {e}")
+            if 'conn' in locals():
+                conn.rollback()
+            return None
+        finally:
+            self.connection_pool.putconn(conn)
+    
+    def get_messages_for_summary(self, session_id: str) -> str:
+        """
+        Get all messages for a session formatted for summarization
+        
+        Args:
+            session_id: The session ID to get messages for
+            
+        Returns:
+            Formatted string of all messages
+        """
+        conn = self.connection_pool.getconn()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT role, content, timestamp FROM fi_messages WHERE session_id = %s ORDER BY timestamp",
+                    (session_id,)
+                )
+                messages = cursor.fetchall()
+                
+                if not messages:
+                    return ""
+                
+                # Format messages for the summary
+                formatted_messages = []
+                for role, content, timestamp in messages:
+                    time_str = timestamp.strftime("%Y-%m-%d %H:%M:%S") if timestamp else "Unknown time"
+                    formatted_messages.append(f"[{time_str}] {role.upper()}: {content}")
+                
+                return "\n\n".join(formatted_messages)
+        except Exception as e:
+            print(f"Error getting messages for summary: {e}")
+            return ""
+        finally:
+            self.connection_pool.putconn(conn)
+    
+    def generate_summary_with_gpt4o(self, messages_text: str) -> str:
+        """
+        Generate a summary of conversation using OpenAI GPT-4o
+        
+        Args:
+            messages_text: Formatted text of all messages in the conversation
+            
+        Returns:
+            Generated summary
+        """
+        try:
+            prompt = f"""Please summarize the following conversation in a concise, professional manner. 
+Focus on the main topics discussed, key questions, and important conclusions or actions.
+Keep the summary under 200 words.
+
+CONVERSATION:
+{messages_text}
+
+SUMMARY:"""
+
+            # Call OpenAI API with GPT-4o
+            response = openai.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant that summarizes conversations accurately and concisely."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=10000,
+                temperature=0.5
+            )
+            
+            # Extract the summary from the response
+            return response.choices[0].message.content.strip()
+            
+        except Exception as e:
+            print(f"Error calling OpenAI API: {e}")
+            return f"Failed to generate summary: {str(e)}"
+    
+    def get_summaries_for_sessions(self, session_ids: List[str]) -> Dict[str, str]:
+        """
+        Get existing summaries for a list of session IDs
+        
+        Args:
+            session_ids: List of session IDs to get summaries for
+            
+        Returns:
+            Dictionary mapping session_id to summary
+        """
+        if not session_ids:
+            return {}
+            
+        conn = self.connection_pool.getconn()
+        try:
+            with conn.cursor() as cursor:
+                placeholders = ','.join(['%s'] * len(session_ids))
+                query = f"SELECT session_id, summary FROM fi_summary WHERE session_id IN ({placeholders})"
+                cursor.execute(query, session_ids)
+                
+                results = cursor.fetchall()
+                return {row[0]: row[1] for row in results}
+        except Exception as e:
+            print(f"Error fetching summaries: {e}")
+            return {}
         finally:
             self.connection_pool.putconn(conn)
 
