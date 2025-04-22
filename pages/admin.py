@@ -77,6 +77,55 @@ def show_user_details(user_data):
     
     dialog.open()
 
+def get_conversation_summaries():
+    """Fetches conversation summaries from the database."""
+    conn = None
+    summaries = []
+    try:
+        conn = user_db.connection_pool.getconn()
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT 
+                    session_id, 
+                    COUNT(*) AS message_count, 
+                    MIN(timestamp) AS start_time, 
+                    MAX(timestamp) AS last_activity
+                FROM 
+                    fi_messages 
+                GROUP BY 
+                    session_id
+                ORDER BY 
+                    last_activity DESC
+            """)
+            rows = cursor.fetchall()
+            
+            for row in rows:
+                session_id, message_count, start_time, last_activity = row
+                
+                # Get the user_id for this session
+                cursor.execute("SELECT user_id FROM fi_users WHERE session_id = %s", (session_id,))
+                user_result = cursor.fetchone()
+                user_id = user_result[0] if user_result else 'Unknown'
+                
+                summaries.append({
+                    'session_id': session_id,
+                    'user_id': user_id,
+                    'message_count': message_count,
+                    'start_time': start_time.strftime("%Y-%m-%d %H:%M:%S") if start_time else 'Unknown',
+                    'last_activity': last_activity.strftime("%Y-%m-%d %H:%M:%S") if last_activity else 'Unknown'
+                })
+                
+        return summaries
+    except Exception as e:
+        ui.notify(f'Error fetching conversation summaries: {str(e)}', type='negative')
+        return []
+    finally:
+        if conn:
+            try:
+                user_db.connection_pool.putconn(conn)
+            except Exception as pool_e:
+                print(f"ERROR putting connection back to pool: {pool_e}")
+
 # --- Main Page Definition ---
 @ui.page('/admin')
 def page_admin():
@@ -88,45 +137,136 @@ def page_admin():
         # Use the title from your snippet
         ui.label('FastInnovation Admin').classes('text-h4 q-mb-md')
 
-        # --- Controls Row ---
-        with ui.row().classes('w-full justify-between items-center mb-4'):
-            # Help text
-            ui.label('Click on any row to view detailed user information and conversation history').classes('text-sm text-gray-600')
-            # Refresh button - Use on_click method
-            refresh_button = ui.button('Refresh', icon='refresh', on_click=lambda: update_table()).props('flat color=primary')
-
-        # --- Table Definition ---
-        # Define columns - using name=field convention for easier slot handling
-        columns = [
-            {'name': 'user_id', 'field': 'user_id', 'label': 'User ID', 'align': 'left', 'sortable': True},
-            {'name': 'session_id', 'field': 'session_id', 'label': 'Session ID', 'align': 'left', 'sortable': True},
-            {'name': 'logged', 'field': 'logged', 'label': 'Logged Status', 'align': 'center', 'sortable': True}
-        ]
-
-        # Create a standard NiceGUI table
-        table = ui.table(
-            columns=columns,
-            rows=[],
-            pagination={'rowsPerPage': 25, 'page': 1}, 
-            row_key='user_id'  # Set row key for unique identification
-        ).classes('w-full')
+        # Create tabs for different admin panels
+        with ui.tabs().classes('w-full') as tabs:
+            ui.tab('Users Table', icon='people')
+            ui.tab('Conversation Summaries', icon='summarize')
         
-        # Add Quasar-specific props
-        #table.props('flat bordered dense row-click pagination')
-        table.props('flat bordered separator=cell pagination-rows-per-page-options=[10,25,50,100]')
+        # Users Table Tab Panel
+        with ui.tab_panels(tabs, value='Users Table').classes('w-full'):
+            with ui.tab_panel('Users Table'):
+                # --- Controls Row ---
+                with ui.row().classes('w-full justify-between items-center mb-4'):
+                    # Help text
+                    ui.label('Click on any row to view detailed user information and conversation history').classes('text-sm text-gray-600')
+                    # Refresh button - Use on_click method
+                    users_refresh_button = ui.button('Refresh', icon='refresh', on_click=lambda: update_users_table()).props('flat color=primary')
 
-        # Add row-click event handler
-        def handle_row_click(e):
-            # The event format is: [event, rowData, rowIndex]
-            if isinstance(e.args, list) and len(e.args) >= 2:
-                # The row data is the second element (index 1) in the args list
-                row_data = e.args[1]  
-                show_user_details(row_data)
-            else:
-                ui.notify("Could not retrieve row data", type="negative")
+                # --- Users Table Definition ---
+                # Define columns - using name=field convention for easier slot handling
+                users_columns = [
+                    {'name': 'user_id', 'field': 'user_id', 'label': 'User ID', 'align': 'left', 'sortable': True},
+                    {'name': 'session_id', 'field': 'session_id', 'label': 'Session ID', 'align': 'left', 'sortable': True},
+                    {'name': 'logged', 'field': 'logged', 'label': 'Logged Status', 'align': 'center', 'sortable': True},
+                    {'name': 'message_count', 'field': 'message_count', 'label': 'Messages', 'align': 'center', 'sortable': True},
+                    {'name': 'start_time', 'field': 'start_time', 'label': 'Started', 'align': 'center', 'sortable': True},
+                    {'name': 'last_activity', 'field': 'last_activity', 'label': 'Last Activity', 'align': 'center', 'sortable': True}
+                ]
+
+                # Create a standard NiceGUI table
+                users_table = ui.table(
+                    columns=users_columns,
+                    rows=[],
+                    pagination={'rowsPerPage': 25, 'page': 1}, 
+                    row_key='user_id'  # Set row key for unique identification
+                ).classes('w-full')
                 
-        table.on('row-click', handle_row_click)
-        
+                # Add Quasar-specific props
+                users_table.props('flat bordered separator=cell pagination-rows-per-page-options=[10,25,50,100]')
+
+                # Add row-click event handler
+                def handle_users_row_click(e):
+                    # The event format is: [event, rowData, rowIndex]
+                    if isinstance(e.args, list) and len(e.args) >= 2:
+                        # The row data is the second element (index 1) in the args list
+                        row_data = e.args[1]  
+                        show_user_details(row_data)
+                    else:
+                        ui.notify("Could not retrieve row data", type="negative")
+                        
+                users_table.on('row-click', handle_users_row_click)
+                
+                # --- Data Update Function (Using your provided logic) ---
+                def update_users_table():
+                    """Fetches user data from the database and updates the table rows."""
+                    conn = None # Initialize conn to None for the finally block
+                    # Fetch user data from database
+                    try:
+                        # Use your database connection pool
+                        conn = user_db.connection_pool.getconn()
+                        cursor = conn.cursor()
+                        
+                        # Get basic user data
+                        cursor.execute("SELECT user_id, session_id, logged, last_active FROM fi_users ORDER BY user_id")
+                        user_rows = cursor.fetchall()
+                        
+                        # Data retrieved successfully
+                        table_rows = []
+                        
+                        for row_tuple in user_rows:
+                            user_id, session_id, logged, last_active = row_tuple
+                            
+                            # Get message count and timestamps for each user
+                            cursor.execute("""
+                                SELECT 
+                                    COUNT(*) AS message_count, 
+                                    MIN(timestamp) AS start_time, 
+                                    MAX(timestamp) AS last_message
+                                FROM 
+                                    fi_messages 
+                                WHERE 
+                                    user_id = %s
+                            """, (user_id,))
+                            
+                            msg_data = cursor.fetchone()
+                            
+                            if msg_data:
+                                message_count, start_time, last_message = msg_data
+                            else:
+                                message_count, start_time, last_message = 0, None, None
+                            
+                            # Use last_active from users table if available, otherwise use last message timestamp
+                            last_activity = last_active if last_active else last_message
+                            
+                            table_rows.append({
+                                'user_id': user_id,
+                                'session_id': session_id,
+                                'logged': 'Yes' if logged else 'No',
+                                'message_count': message_count,
+                                'start_time': start_time.strftime("%Y-%m-%d %H:%M:%S") if start_time else 'Never',
+                                'last_activity': last_activity.strftime("%Y-%m-%d %H:%M:%S") if last_activity else 'Never'
+                            })
+                        
+                        # Update the table component's rows
+                        users_table.rows = table_rows
+                        
+                        # Show subtle notification
+                        if len(table_rows) > 0:
+                            ui.notify(f"Loaded {len(table_rows)} users", type='positive', position='bottom-right', timeout=1500)
+
+                    except Exception as e:
+                        # Log the error and notify user
+                        # Use your notification style
+                        ui.notify(f'Error loading users: {str(e)}', type='negative', position='top-right')
+                    finally:
+                        # Ensure connection is returned to the pool using your logic
+                        if conn:
+                            try:
+                                user_db.connection_pool.putconn(conn)
+                            except Exception as pool_e:
+                                print(f"ERROR putting connection back to pool: {pool_e}")
+
+                # Initial Data Load for Users Table
+                update_users_table()
+                
+            # Conversation Summaries Tab Panel
+            with ui.tab_panel('Conversation Summaries'):
+                # Coming soon message
+                with ui.column().classes('w-full h-[300px] items-center justify-center'):
+                    ui.label('Conversation Analytics Coming Soon').classes('text-h5 text-gray-400')
+                    ui.icon('upcoming').classes('text-6xl text-gray-300 my-4')
+                    ui.label('This feature is under development').classes('text-subtitle1 text-gray-400')
+
         # Add CSS classes to make rows appear clickable
         ui.add_head_html('''
         <style>
@@ -139,55 +279,5 @@ def page_admin():
             }
         </style>
         ''')
-        
-        # --- Data Update Function (Using your provided logic) ---
-        def update_table():
-            """Fetches user data from the database and updates the table rows."""
-            conn = None # Initialize conn to None for the finally block
-            # Fetch user data from database
-            try:
-                # Use your database connection pool
-                conn = user_db.connection_pool.getconn()
-                cursor = conn.cursor()
-                # Use your SQL query
-                cursor.execute("SELECT user_id, session_id, logged FROM fi_users ORDER BY user_id") # Added ORDER BY
-                rows = cursor.fetchall()
-                # Data retrieved successfully
-
-                table_rows = []
-                for row_tuple in rows: # Iterate through the tuples from fetchall
-                    # Convert tuple to dictionary matching column fields
-                    # This structure matches the user's snippet logic
-                    table_rows.append({
-                        'user_id': row_tuple[0],
-                        'session_id': row_tuple[1],
-                        'logged': 'Yes' if row_tuple[2] else 'No' # Convert boolean
-                    })
-                # Process complete
-
-                # Update the table component's rows
-                table.rows = table_rows
-                
-                # Show subtle notification
-                if len(table_rows) > 0:
-                    ui.notify(f"Loaded {len(table_rows)} users", type='positive', position='bottom-right', timeout=1500)
-
-            except Exception as e:
-                # Log the error and notify user
-                # Use your notification style
-                ui.notify(f'Error loading users: {str(e)}', type='negative', position='top-right')
-            finally:
-                # Ensure connection is returned to the pool using your logic
-                if conn:
-                    try:
-                        user_db.connection_pool.putconn(conn)
-                    except Exception as pool_e:
-                        print(f"ERROR putting connection back to pool: {pool_e}")
-
-        # No need for another helpful message, moved to above the table
-
-        # --- Initial Data Load ---
-        # Populate the table when the page is first loaded
-        update_table()
 
 # --- No ui.run() here, as it's part of an existing app ---
