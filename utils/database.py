@@ -1,5 +1,6 @@
 import os
 from datetime import datetime
+import pytz
 from typing import Optional, Dict, Any, List
 from nicegui import app
 import psycopg2
@@ -7,6 +8,13 @@ from psycopg2.extras import DictCursor
 from psycopg2.pool import SimpleConnectionPool
 from dotenv import load_dotenv
 from utils.database_interface import DatabaseInterface
+
+# Set up San Francisco (Pacific Time) timezone
+sf_timezone = pytz.timezone('America/Los_Angeles')
+
+def get_sf_time():
+    """Get current time in San Francisco timezone"""
+    return datetime.now(pytz.utc).astimezone(sf_timezone)
 
 load_dotenv()
 
@@ -102,7 +110,7 @@ class PostgresAdapter(DatabaseInterface):
                             print(f"Creating new user for session {session_id}")
                             cursor.execute(
                                 "INSERT INTO fi_users (session_id, last_active, status) VALUES (%s, %s, %s) RETURNING user_id",
-                                (session_id, datetime.now(), 'Active')
+                                (session_id, get_sf_time(), 'Active')
                             )
                             user_id = cursor.fetchone()[0]
                             conn.commit()
@@ -110,7 +118,7 @@ class PostgresAdapter(DatabaseInterface):
                     # Update last_active time
                     cursor.execute(
                         "UPDATE fi_users SET last_active = %s WHERE user_id = %s",
-                        (datetime.now(), user_id)
+                        (get_sf_time(), user_id)
                     )
                     conn.commit()
                 
@@ -222,7 +230,7 @@ class PostgresAdapter(DatabaseInterface):
                     try:
                         cursor.execute(
                             "INSERT INTO fi_users (session_id, last_active, status) VALUES (%s, %s, %s) RETURNING user_id",
-                            (session_id, datetime.now(), 'Idle')
+                            (session_id, get_sf_time(), 'Idle')
                         )
                         user_id = cursor.fetchone()[0]
                         print(f"Created new user {user_id} for session {session_id}")
@@ -237,7 +245,7 @@ class PostgresAdapter(DatabaseInterface):
                             user_id = result[0]
                             cursor.execute(
                                 "UPDATE fi_users SET last_active = %s WHERE user_id = %s",
-                                (datetime.now(), user_id)
+                                (get_sf_time(), user_id)
                             )
                             conn.commit()
                             return user_id
@@ -248,7 +256,7 @@ class PostgresAdapter(DatabaseInterface):
                             print(f"Session collision, creating with new session_id: {new_session_id}")
                             cursor.execute(
                                 "INSERT INTO fi_users (session_id, last_active, status) VALUES (%s, %s, %s) RETURNING user_id",
-                                (new_session_id, datetime.now(), 'Idle')
+                                (new_session_id, get_sf_time(), 'Idle')
                             )
                             user_id = cursor.fetchone()[0]
                             conn.commit()
@@ -281,7 +289,7 @@ class PostgresAdapter(DatabaseInterface):
                     # Update last active time
                     cursor.execute(
                         "UPDATE fi_users SET last_active = %s WHERE user_id = %s",
-                        (datetime.now(), row['user_id'])
+                        (get_sf_time(), row['user_id'])
                     )
                     conn.commit()
                     return dict(row)
@@ -328,7 +336,7 @@ class PostgresAdapter(DatabaseInterface):
                     with conn.cursor() as cursor:
                         cursor.execute(
                             "UPDATE fi_users SET status = %s, last_active = %s WHERE user_id = %s",
-                            (status, datetime.now(), user_id)
+                            (status, get_sf_time(), user_id)
                         )
                     conn.commit()
                     return True
@@ -338,7 +346,7 @@ class PostgresAdapter(DatabaseInterface):
                     with conn.cursor() as cursor:
                         cursor.execute(
                             "UPDATE fi_users SET status = %s, last_active = %s WHERE user_id = %s",
-                            (status, datetime.now(), user['user_id'])
+                            (status, get_sf_time(), user['user_id'])
                         )
                     conn.commit()
                     return True
@@ -368,9 +376,24 @@ class PostgresAdapter(DatabaseInterface):
         conn = self.connection_pool.getconn()
         try:
             with conn.cursor(cursor_factory=DictCursor) as cursor:
-                # Construct datetime strings for start and end
-                start_datetime = f"{start_date} {start_hour:02d}:00:00"
-                end_datetime = f"{end_date} {end_hour:02d}:59:59"
+                # Construct datetime strings for start and end with SF timezone
+                # Parse input dates and convert to SF timezone
+                try:
+                    # Convert string dates to proper datetime objects with SF timezone
+                    start_dt = datetime.strptime(f"{start_date} {start_hour:02d}:00:00", "%Y-%m-%d %H:%M:%S")
+                    start_dt = sf_timezone.localize(start_dt)
+                    
+                    end_dt = datetime.strptime(f"{end_date} {end_hour:02d}:59:59", "%Y-%m-%d %H:%M:%S") 
+                    end_dt = sf_timezone.localize(end_dt)
+                    
+                    # Format for database query
+                    start_datetime = start_dt.strftime("%Y-%m-%d %H:%M:%S")
+                    end_datetime = end_dt.strftime("%Y-%m-%d %H:%M:%S")
+                except ValueError as e:
+                    print(f"Error parsing dates: {e}")
+                    # Fallback to simple string construction
+                    start_datetime = f"{start_date} {start_hour:02d}:00:00"
+                    end_datetime = f"{end_date} {end_hour:02d}:59:59"
                 
                 # Base query to get all messages within the date range
                 query = """
