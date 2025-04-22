@@ -147,19 +147,42 @@ class SummaryAnalyzer:
         Returns:
             Plotly figure
         """
+        print("\n--- DEBUG: generate_topic_heatmap ---")
+        print(f"Input analyses count: {len(analyses)}")
+        
         # Collect all topics with their sentiment and importance
         topic_data = []
         
-        for analysis in analyses:
-            if 'analysis' in analysis and 'topics' in analysis['analysis']:
-                for topic in analysis['analysis']['topics']:
-                    topic_data.append({
-                        'topic': topic.get('topic', 'Unknown'),
-                        'sentiment': topic.get('sentiment', 'neutral'),
-                        'importance': topic.get('importance', 3)
-                    })
+        for idx, analysis in enumerate(analyses):
+            print(f"Processing analysis {idx+1}/{len(analyses)}")
+            
+            if 'analysis' not in analysis:
+                print(f"  WARNING: Analysis {idx+1} has no 'analysis' key")
+                continue
+                
+            if 'topics' not in analysis['analysis']:
+                print(f"  WARNING: Analysis {idx+1} has no 'topics' key in analysis")
+                continue
+                
+            print(f"  Found {len(analysis['analysis']['topics'])} topics in analysis {idx+1}")
+            
+            for topic_idx, topic in enumerate(analysis['analysis']['topics']):
+                topic_name = topic.get('topic', 'Unknown')
+                sentiment = topic.get('sentiment', 'neutral')
+                importance = topic.get('importance', 3)
+                
+                print(f"    Topic {topic_idx+1}: {topic_name} - {sentiment} (importance: {importance})")
+                
+                topic_data.append({
+                    'topic': topic_name,
+                    'sentiment': sentiment,
+                    'importance': importance
+                })
+        
+        print(f"Total topic data collected: {len(topic_data)}")
         
         if not topic_data:
+            print("No topic data available, returning empty figure")
             # Return empty figure with message
             fig = go.Figure()
             fig.add_annotation(
@@ -169,39 +192,66 @@ class SummaryAnalyzer:
             )
             return fig
         
-        # Convert to DataFrame
-        df = pd.DataFrame(topic_data)
-        
-        # Count occurrences of each topic-sentiment combination
-        topic_counts = df.groupby(['topic', 'sentiment', 'importance']).size().reset_index(name='count')
-        
-        # Create a pivot table for the heatmap
-        pivot_df = topic_counts.pivot_table(
-            index='topic', 
-            columns='sentiment', 
-            values='count', 
-            aggfunc='sum',
-            fill_value=0
-        )
-        
-        # Create heatmap
-        fig = px.imshow(
-            pivot_df,
-            labels=dict(x="Sentiment", y="Topic", color="Count"),
-            x=pivot_df.columns,
-            y=pivot_df.index,
-            aspect="auto",
-            color_continuous_scale='Viridis'
-        )
-        
-        fig.update_layout(
-            title="Topic Sentiment Heatmap",
-            xaxis_title="Sentiment",
-            yaxis_title="Topic",
-            height=600
-        )
-        
-        return fig
+        try:
+            # Convert to DataFrame
+            print("Converting to DataFrame...")
+            df = pd.DataFrame(topic_data)
+            print(f"DataFrame shape: {df.shape}")
+            print(f"DataFrame columns: {df.columns.tolist()}")
+            print(f"Unique topics: {df['topic'].nunique()}")
+            print(f"Unique sentiments: {df['sentiment'].unique().tolist()}")
+            
+            # Count occurrences of each topic-sentiment combination
+            print("Creating topic counts...")
+            topic_counts = df.groupby(['topic', 'sentiment', 'importance']).size().reset_index(name='count')
+            print(f"Topic counts shape: {topic_counts.shape}")
+            
+            # Create a pivot table for the heatmap
+            print("Creating pivot table...")
+            pivot_df = topic_counts.pivot_table(
+                index='topic', 
+                columns='sentiment', 
+                values='count', 
+                aggfunc='sum',
+                fill_value=0
+            )
+            print(f"Pivot table shape: {pivot_df.shape}")
+            print(f"Pivot table columns: {pivot_df.columns.tolist()}")
+            
+            # Create heatmap
+            print("Creating heatmap figure...")
+            fig = px.imshow(
+                pivot_df,
+                labels=dict(x="Sentiment", y="Topic", color="Count"),
+                x=pivot_df.columns,
+                y=pivot_df.index,
+                aspect="auto",
+                color_continuous_scale='Viridis'
+            )
+            
+            fig.update_layout(
+                title="Topic Sentiment Heatmap",
+                xaxis_title="Sentiment",
+                yaxis_title="Topic",
+                height=600
+            )
+            
+            print("Heatmap figure created successfully")
+            return fig
+            
+        except Exception as e:
+            import traceback
+            print(f"Error creating heatmap: {e}")
+            print(traceback.format_exc())
+            
+            # Return error figure
+            fig = go.Figure()
+            fig.add_annotation(
+                text=f"Error creating visualization: {str(e)}",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, showarrow=False
+            )
+            return fig
     
     @staticmethod
     def generate_satisfaction_chart(analyses: List[Dict[str, Any]]):
