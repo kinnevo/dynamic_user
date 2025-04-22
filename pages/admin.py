@@ -354,6 +354,9 @@ def page_admin():
                                 ui.label('Please select at least one user').classes('text-negative text-h6')
                             return
                         
+                        # Initialize progress_label to None (important for cleanup later)
+                        progress_label = None
+                        
                         # Add placeholder message for UI
                         with results_container:
                             ui.label('Fetching conversations...').classes('text-h6 mb-2')
@@ -372,8 +375,9 @@ def page_admin():
                                     ui.label(f'Selected Users: {user_ids}')
                                 else:
                                     ui.label('Selected Users: None')
-                                
-                            ui.label('Check terminal for debug output').classes('text-primary mt-4')
+                            
+                            # Add progress indicator    
+                            progress_label = ui.label('Processing...').classes('text-primary mt-4')
                         
                         try:
                             # Fetch conversations from database using new method
@@ -381,47 +385,177 @@ def page_admin():
                             print(f"Date Range: {start_formatted} to {end_formatted}")
                             print(f"Selected Users: {selected_users}")
                             
+                            # Get conversations with at least 2 messages (1 user + 1 assistant)
                             conversations = user_db.get_conversations_by_date_and_users(
                                 start_date=start_dt,
                                 start_hour=start_hr,
                                 end_date=end_dt,
                                 end_hour=end_hr,
-                                user_ids=selected_users
+                                user_ids=selected_users,
+                                min_messages=2  # Only include conversations with at least 2 messages
                             )
                             
-                            # Print conversation data to terminal
-                            print(f"\nFound {len(conversations)} conversations")
+                            if not conversations:
+                                results_container.clear()
+                                with results_container:
+                                    ui.label('No conversations found for the selected criteria').classes('text-h6 mt-4')
+                                return
                             
-                            for i, conv in enumerate(conversations):
-                                print(f"\nConversation {i+1}:")
-                                print(f"  Session ID: {conv['session_id']}")
-                                print(f"  User ID: {conv['user_id']}")
-                                print(f"  User Session ID: {conv['user_session_id']}")
-                                print(f"  Start Time: {conv['start_time'].strftime('%Y-%m-%d %H:%M:%S')}")
-                                print(f"  End Time: {conv['end_time'].strftime('%Y-%m-%d %H:%M:%S')}")
-                                print(f"  Message Count: {conv['message_count']}")
-                                
-                                # Print first message preview
-                                if conv['messages']:
-                                    first_msg = conv['messages'][0]
-                                    print(f"  First Message: [{first_msg['role']}] {first_msg['content'][:50]}...")
-                                
-                                print(f"  Total Messages: {len(conv['messages'])}")
+                            # Update progress indicator
+                            progress_label.text = f'Found {len(conversations)} conversations. Generating summaries...'
                             
-                            print("\n=== END OF CONVERSATIONS ===\n")
+                            # Get existing summaries for these sessions
+                            session_ids = [conv['session_id'] for conv in conversations]
+                            existing_summaries = user_db.get_summaries_for_sessions(session_ids)
                             
-                            # Update UI with minimal info
+                            # Process each conversation
+                            total_processed = 0
+                            new_summaries = 0
+                            already_summarized = len(existing_summaries)
+                            
+                            # Clear and rebuild results
+                            results_container.clear()
+                            # Set progress_label to None since it was removed when clearing the container
+                            progress_label = None
+                            
                             with results_container:
-                                ui.label(f'Found {len(conversations)} conversations').classes('text-subtitle1 mt-4 font-bold')
-                                ui.label('Debug data printed to terminal. Summarization will be implemented in the next phase.').classes('text-gray-500 italic mt-4')
+                                ui.label('Conversation Summaries').classes('text-h6 mb-2')
+                                ui.separator()
+                                
+                                # Selection criteria display
+                                with ui.column().classes('w-full mt-2 mb-4'):
+                                    ui.label('Selection Criteria:').classes('font-bold')
+                                    ui.label(f'Date Range: {start_formatted} to {end_formatted}')
+                                    
+                                    # Format user selection display
+                                    if selected_users and 'all' in selected_users:
+                                        ui.label('Selected Users: All Users')
+                                    elif selected_users:
+                                        user_ids = ', '.join([f"User {uid}" for uid in selected_users])
+                                        ui.label(f'Selected Users: {user_ids}')
+                                        
+                                # Create a new progress label that won't be cleared
+                                progress_label = ui.label('Processing...').classes('text-primary mt-4')
+                                
+                                # Process all conversations and generate summaries
+                                for i, conv in enumerate(conversations):
+                                    session_id = conv['session_id']
+                                    user_id = conv['user_id']
+                                    
+                                    # Update progress on each iteration
+                                    if progress_label:
+                                        progress_label.text = f'Processing conversation {i+1} of {len(conversations)}...'
+                                    
+                                    # Check if summary exists already
+                                    summary_text = None
+                                    is_new_summary = False
+                                    
+                                    if session_id in existing_summaries:
+                                        summary_text = existing_summaries[session_id]
+                                        print(f"Using existing summary for session {session_id}")
+                                    else:
+                                        # Generate new summary
+                                        print(f"Generating new summary for session {session_id}")
+                                        summary_text = user_db.create_conversation_summary(session_id, user_id)
+                                        if summary_text:
+                                            new_summaries += 1
+                                            is_new_summary = True
+                                    
+                                    if summary_text:
+                                        total_processed += 1
+                                        
+                                        # Create a card for each summary
+                                        with ui.card().classes('w-full mb-4'):
+                                            with ui.row().classes('w-full justify-between items-center'):
+                                                ui.label(f"User {user_id} - {conv['start_time'].strftime('%Y-%m-%d %H:%M')}").classes('text-subtitle1 font-bold')
+                                                if is_new_summary:
+                                                    ui.label('NEW').classes('bg-green-500 text-white text-xs px-2 py-1 rounded')
+                                            
+                                            ui.separator()
+                                            
+                                            with ui.column().classes('w-full p-2'):
+                                                # Conversation metadata
+                                                with ui.row().classes('text-xs text-gray-500 justify-between w-full'):
+                                                    ui.label(f"Session ID: {session_id[:8]}...")
+                                                    ui.label(f"Messages: {conv['message_count']}")
+                                                
+                                                # Summary content
+                                                ui.markdown(summary_text).classes('w-full mt-2')
+                                                
+                                                # View details button
+                                                with ui.row().classes('w-full justify-end'):
+                                                    ui.button('View Details', icon='visibility',
+                                                              on_click=lambda conv=conv: view_conversation_details(conv)).props('flat dense')
+                            
+                                # Summary statistics
+                                ui.separator()
+                                ui.label(f'Summary: {total_processed} conversations processed').classes('text-subtitle1 mt-4 font-bold')
+                                ui.label(f'{new_summaries} new summaries generated, {already_summarized} existing summaries retrieved').classes('text-sm')
+                                
+                                # Remove progress label at the end by replacing its text
+                                # (don't use delete() as it may already be removed from parent)
+                                if progress_label:
+                                    progress_label.text = f'Completed: {total_processed} conversations processed'
                             
                         except Exception as e:
                             # Print error to terminal
-                            print(f"\nERROR fetching conversations: {str(e)}")
+                            print(f"\nERROR generating summaries: {str(e)}")
+                            
+                            # Set progress_label to None since we're clearing container
+                            progress_label = None
                             
                             # Show error in UI
+                            results_container.clear()
                             with results_container:
                                 ui.label(f'Error: {str(e)}').classes('text-negative')
+                    
+                    # Function to view conversation details in a dialog
+                    def view_conversation_details(conversation):
+                        """Show conversation details in a dialog."""
+                        session_id = conversation['session_id']
+                        user_id = conversation['user_id']
+                        
+                        with ui.dialog() as dialog, ui.card().classes('w-[60vw] max-w-[800px]'):
+                            # Header
+                            with ui.row().classes('w-full bg-primary text-white p-4'):
+                                ui.label(f"Conversation Details - User {user_id}").classes('text-h6')
+                            
+                            # Metadata
+                            with ui.column().classes('p-4'):
+                                ui.label(f"Session ID: {session_id}")
+                                start_time = conversation['start_time'].strftime('%Y-%m-%d %H:%M:%S')
+                                end_time = conversation['end_time'].strftime('%Y-%m-%d %H:%M:%S')
+                                ui.label(f"Time Range: {start_time} to {end_time}")
+                                ui.label(f"Messages: {conversation['message_count']}")
+                            
+                            # Messages
+                            ui.label('Messages').classes('text-h6 pl-4')
+                            with ui.column().classes('w-full p-4 max-h-[400px] overflow-y-auto'):
+                                for msg in conversation['messages']:
+                                    time_str = msg['timestamp'].strftime("%H:%M:%S") if 'timestamp' in msg else ""
+                                    
+                                    if msg['role'] == 'user':
+                                        with ui.element('div').classes('self-end bg-blue-100 p-3 rounded-lg my-2 max-w-[80%]'):
+                                            ui.label(f"{time_str} - User").classes('text-xs opacity-70 mb-1')
+                                            ui.markdown(msg['content'])
+                                    else:
+                                        with ui.element('div').classes('self-start bg-gray-100 p-3 rounded-lg my-2 max-w-[80%]'):
+                                            ui.label(f"{time_str} - Assistant").classes('text-xs opacity-70 mb-1')
+                                            ui.markdown(msg['content'])
+                            
+                            # Summary section
+                            ui.label('Summary').classes('text-h6 pl-4')
+                            with ui.column().classes('w-full p-4 bg-gray-50 rounded-lg mx-4 mb-4'):
+                                # Get the summary
+                                summaries = user_db.get_summaries_for_sessions([session_id])
+                                summary = summaries.get(session_id, "No summary available")
+                                ui.markdown(summary)
+                            
+                            # Footer with close button
+                            with ui.row().classes('w-full justify-end p-4'):
+                                ui.button('Close', on_click=dialog.close).props('flat color=primary')
+                        
+                        dialog.open()
 
         # Add CSS classes to make rows appear clickable
         ui.add_head_html('''
