@@ -2,7 +2,7 @@
 import functools
 from nicegui import ui
 # Use the specific imports from your snippet
-from utils.layouts import create_navigation_menu_2
+from utils.layouts import create_navigation_menu_2, create_date_range_selector, create_user_selector
 
 # Database connection
 from utils.database import PostgresAdapter
@@ -261,11 +261,85 @@ def page_admin():
                 
             # Conversation Summaries Tab Panel
             with ui.tab_panel('Conversation Summaries'):
-                # Coming soon message
-                with ui.column().classes('w-full h-[300px] items-center justify-center'):
-                    ui.label('Conversation Analytics Coming Soon').classes('text-h5 text-gray-400')
-                    ui.icon('upcoming').classes('text-6xl text-gray-300 my-4')
-                    ui.label('This feature is under development').classes('text-subtitle1 text-gray-400')
+                with ui.column().classes('w-full p-4'):
+                    #ui.label('Conversation Summaries').classes('text-h5 q-mb-md')
+                    
+                    # Date range and user selection controls - Single row layout
+                    ui.label('Selection Criteria').classes('text-subtitle1 q-mb-sm')
+                    
+                    # Create a single row to hold everything
+                    with ui.row().classes('w-full gap-4 items-end'):
+                        # Use a custom wrapper for better control
+                        with ui.element('div').classes('flex gap-2 items-end flex-grow-1 w-2/3'):
+                            # Create date range selectors in the same container
+                            start_date_input, start_hour, end_date_input, end_hour = create_date_range_selector()
+                        
+                        # Create user selector in the same row with proper width
+                        user_select, refresh_users = create_user_selector(width='w-1/3')
+                    
+                    # Control buttons row
+                    with ui.row().classes('w-full justify-between mt-4'):
+                        # Refresh users button
+                        refresh_users_btn = ui.button('Refresh Users', icon='refresh', on_click=lambda: refresh_users()).props('flat')
+                        
+                        # Generate summaries button
+                        generate_btn = ui.button('Generate Summaries', icon='analytics', on_click=lambda: generate_summaries())
+                        generate_btn.props('color=primary')
+                    
+                    # Results container for summaries
+                    results_container = ui.column().classes('w-full mt-4 border rounded p-4')
+                    
+                    # Placeholder text for empty results
+                    with results_container:
+                        ui.label('Select date range and users, then click "Generate Summaries"').classes('text-gray-500 italic text-center w-full py-8')
+                    
+                    # Function to generate summaries (will be implemented later)
+                    def generate_summaries():
+                        # Get selected values
+                        start_dt = start_date_input.value
+                        start_hr = start_hour.value
+                        end_dt = end_date_input.value
+                        end_hr = end_hour.value
+                        selected_users = user_select.value
+                        
+                        # Format datetime for display
+                        start_formatted = f"{start_dt} {int(start_hr):02d}:00:00" if start_dt else "Not selected"
+                        end_formatted = f"{end_dt} {int(end_hr):02d}:00:00" if end_dt else "Not selected"
+                        
+                        # Clear previous results
+                        results_container.clear()
+                        
+                        # Validate inputs
+                        if not start_dt or not end_dt:
+                            with results_container:
+                                ui.label('Please select both start and end dates').classes('text-negative text-h6')
+                            return
+                        
+                        if not selected_users:
+                            with results_container:
+                                ui.label('Please select at least one user').classes('text-negative text-h6')
+                            return
+                        
+                        # Add placeholder message for now
+                        with results_container:
+                            ui.label('Generating summaries...').classes('text-h6 mb-2')
+                            ui.separator()
+                            
+                            # Display selection criteria
+                            with ui.column().classes('w-full mt-2'):
+                                ui.label('Selection Criteria:').classes('font-bold')
+                                ui.label(f'Date Range: {start_formatted} to {end_formatted}')
+                                
+                                # Format user selection display
+                                if selected_users and 'all' in selected_users:
+                                    ui.label('Selected Users: All Users')
+                                elif selected_users:
+                                    user_ids = ', '.join([f"User {uid}" for uid in selected_users])
+                                    ui.label(f'Selected Users: {user_ids}')
+                                else:
+                                    ui.label('Selected Users: None')
+                                
+                            ui.label('This feature will be implemented in the next phase').classes('text-gray-500 italic mt-4')
 
         # Add CSS classes to make rows appear clickable
         ui.add_head_html('''
