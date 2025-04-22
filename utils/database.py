@@ -660,5 +660,261 @@ SUMMARY:"""
             return {}
         finally:
             self.connection_pool.putconn(conn)
+            
+    def get_all_summaries(self, limit: int = 100, with_user_info: bool = True) -> List[Dict[str, Any]]:
+        """
+        Get all conversation summaries from the database
+        
+        Args:
+            limit: Maximum number of summaries to retrieve
+            with_user_info: Whether to include user information
+            
+        Returns:
+            List of summary objects with metadata
+        """
+        conn = self.connection_pool.getconn()
+        try:
+            with conn.cursor(cursor_factory=DictCursor) as cursor:
+                if with_user_info:
+                    # Query with user info joined
+                    query = """
+                        SELECT 
+                            s.summary_id, 
+                            s.session_id, 
+                            s.user_id, 
+                            s.created_at, 
+                            s.summary,
+                            u.status,
+                            u.last_active,
+                            u.logged
+                        FROM 
+                            fi_summary s
+                        LEFT JOIN 
+                            fi_users u ON s.user_id = u.user_id
+                        ORDER BY 
+                            s.created_at DESC
+                        LIMIT %s
+                    """
+                else:
+                    # Simple query without user info
+                    query = """
+                        SELECT 
+                            summary_id, 
+                            session_id, 
+                            user_id, 
+                            created_at, 
+                            summary
+                        FROM 
+                            fi_summary
+                        ORDER BY 
+                            created_at DESC
+                        LIMIT %s
+                    """
+                
+                cursor.execute(query, (limit,))
+                results = cursor.fetchall()
+                
+                # Convert to list of dictionaries
+                summaries = [dict(row) for row in results]
+                
+                return summaries
+        except Exception as e:
+            print(f"Error fetching all summaries: {e}")
+            return []
+        finally:
+            self.connection_pool.putconn(conn)
+            
+    def get_summaries_by_date_range(self, start_date: str, start_hour: int, 
+                                   end_date: str, end_hour: int,
+                                   user_ids: list = None, limit: int = 100) -> List[Dict[str, Any]]:
+        """
+        Get summaries filtered by date range and user IDs
+        
+        Args:
+            start_date: Start date in format 'YYYY-MM-DD'
+            start_hour: Start hour (0-23)
+            end_date: End date in format 'YYYY-MM-DD'
+            end_hour: End hour (0-23)
+            user_ids: List of user IDs to filter by, or None for all users
+            limit: Maximum number of summaries to retrieve
+            
+        Returns:
+            List of summary objects with metadata
+        """
+        conn = self.connection_pool.getconn()
+        try:
+            with conn.cursor(cursor_factory=DictCursor) as cursor:
+                # Parse input dates and convert to SF timezone
+                try:
+                    # Convert string dates to proper datetime objects with SF timezone
+                    start_dt = datetime.strptime(f"{start_date} {start_hour:02d}:00:00", "%Y-%m-%d %H:%M:%S")
+                    start_dt = sf_timezone.localize(start_dt)
+                    
+                    end_dt = datetime.strptime(f"{end_date} {end_hour:02d}:59:59", "%Y-%m-%d %H:%M:%S") 
+                    end_dt = sf_timezone.localize(end_dt)
+                    
+                    # Format for database query
+                    start_datetime = start_dt.strftime("%Y-%m-%d %H:%M:%S %z")
+                    end_datetime = end_dt.strftime("%Y-%m-%d %H:%M:%S %z")
+                    
+                    print(f"Using timezone-aware dates: {start_datetime} to {end_datetime}")
+                except ValueError as e:
+                    print(f"Error parsing dates: {e}")
+                    # Fallback to simple string construction
+                    start_datetime = f"{start_date} {start_hour:02d}:00:00"
+                    end_datetime = f"{end_date} {end_hour:02d}:59:59"
+                
+                # Base query
+                query = """
+                    SELECT 
+                        s.summary_id, 
+                        s.session_id, 
+                        s.user_id, 
+                        s.created_at, 
+                        s.summary,
+                        u.status,
+                        u.last_active,
+                        u.logged
+                    FROM 
+                        fi_summary s
+                    LEFT JOIN 
+                        fi_users u ON s.user_id = u.user_id
+                    WHERE 
+                        s.created_at BETWEEN %s AND %s
+                """
+                params = [start_datetime, end_datetime]
+                
+                # Add user filtering if specific users were selected
+                if user_ids and 'all' not in user_ids:
+                    # Handle different types of user_ids input
+                    int_user_ids = []
+                    for uid in user_ids:
+                        # Try to convert to int if it's a string digit
+                        if isinstance(uid, str) and uid.isdigit():
+                            int_user_ids.append(int(uid))
+                        # Already an int
+                        elif isinstance(uid, int):
+                            int_user_ids.append(uid)
+                    
+                    # Only add the filter if we have valid user IDs
+                    if int_user_ids:
+                        placeholders = ','.join(['%s'] * len(int_user_ids))
+                        query += f" AND s.user_id IN ({placeholders})"
+                        params.extend(int_user_ids)
+                
+                # Add ordering and limit
+                query += """
+                    ORDER BY 
+                        s.created_at DESC
+                    LIMIT %s
+                """
+                params.append(limit)
+                
+                # Execute query
+                cursor.execute(query, params)
+                results = cursor.fetchall()
+                
+                # Convert to list of dictionaries
+                summaries = [dict(row) for row in results]
+                
+                return summaries
+        except Exception as e:
+            print(f"Error fetching summaries by date range: {e}")
+            return []
+        finally:
+            self.connection_pool.putconn(conn)
+    
+    def save_analysis_results(self, analysis_results: List[Dict[str, Any]]) -> bool:
+        """
+        Save analysis results for multiple summaries
+        
+        Args:
+            analysis_results: List of analysis result dictionaries, each containing summary_id and analysis data
+            
+        Returns:
+            Success boolean
+        """
+        if not analysis_results:
+            return False
+            
+        conn = self.connection_pool.getconn()
+        try:
+            # Create fi_analysis table if it doesn't exist
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS fi_analysis (
+                        analysis_id SERIAL PRIMARY KEY,
+                        summary_id INTEGER NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        analysis JSONB NOT NULL,
+                        FOREIGN KEY (summary_id) REFERENCES fi_summary(summary_id)
+                    );
+                """)
+                conn.commit()
+                
+                # Insert analysis results
+                for result in analysis_results:
+                    if 'summary_id' not in result or 'analysis' not in result:
+                        print(f"Skipping analysis result - missing required fields")
+                        continue
+                        
+                    # Check if analysis already exists for this summary
+                    cursor.execute(
+                        "SELECT analysis_id FROM fi_analysis WHERE summary_id = %s",
+                        (result['summary_id'],)
+                    )
+                    existing = cursor.fetchone()
+                    
+                    if existing:
+                        # Update existing analysis
+                        cursor.execute(
+                            "UPDATE fi_analysis SET analysis = %s, created_at = %s WHERE summary_id = %s",
+                            (result['analysis'], get_sf_time(), result['summary_id'])
+                        )
+                    else:
+                        # Insert new analysis
+                        cursor.execute(
+                            "INSERT INTO fi_analysis (summary_id, created_at, analysis) VALUES (%s, %s, %s)",
+                            (result['summary_id'], get_sf_time(), result['analysis'])
+                        )
+                
+                conn.commit()
+                return True
+        except Exception as e:
+            print(f"Error saving analysis results: {e}")
+            if 'conn' in locals():
+                conn.rollback()
+            return False
+        finally:
+            self.connection_pool.putconn(conn)
+    
+    def get_analysis_for_summary(self, summary_id: int) -> Optional[Dict[str, Any]]:
+        """
+        Get analysis results for a specific summary
+        
+        Args:
+            summary_id: ID of the summary to get analysis for
+            
+        Returns:
+            Analysis data dictionary or None if not found
+        """
+        conn = self.connection_pool.getconn()
+        try:
+            with conn.cursor(cursor_factory=DictCursor) as cursor:
+                cursor.execute(
+                    "SELECT * FROM fi_analysis WHERE summary_id = %s",
+                    (summary_id,)
+                )
+                result = cursor.fetchone()
+                
+                if result:
+                    return dict(result)
+                else:
+                    return None
+        except Exception as e:
+            print(f"Error fetching analysis for summary {summary_id}: {e}")
+            return None
+        finally:
+            self.connection_pool.putconn(conn)
 
 

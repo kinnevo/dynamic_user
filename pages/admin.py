@@ -1,12 +1,23 @@
 #!/usr/bin/env python3
 import functools
 from nicegui import ui
+from datetime import datetime
+import json
+import plotly.graph_objects as go
+import plotly.express as px
+import pandas as pd
+from collections import Counter
+
 # Use the specific imports from your snippet
 from utils.layouts import create_navigation_menu_2, create_date_range_selector, create_user_selector
+from utils.summary_analyzer import SummaryAnalyzer
 
 # Database connection
 from utils.database import PostgresAdapter
 user_db = PostgresAdapter()
+
+# Initialize the summary analyzer
+summary_analyzer = SummaryAnalyzer(model_name="gpt-4o")
 
 # --- Dialog Handler Function ---
 def show_user_details(user_data):
@@ -141,6 +152,7 @@ def page_admin():
         with ui.tabs().classes('w-full') as tabs:
             ui.tab('Users Table', icon='people')
             ui.tab('Conversation Summaries', icon='summarize')
+            ui.tab('Macro Analysis', icon='analytics')
         
         # Users Table Tab Panel
         with ui.tab_panels(tabs, value='Users Table').classes('w-full'):
@@ -557,6 +569,294 @@ def page_admin():
                         
                         dialog.open()
 
+            # Macro Analysis Tab Panel
+            with ui.tab_panel('Macro Analysis'):
+                with ui.column().classes('w-full p-4'):
+                    ui.label('Conversation Macro Analysis').classes('text-h5 q-mb-md')
+                    
+                    # Date range and user selection controls
+                    ui.label('Analysis Parameters').classes('text-subtitle1 q-mb-sm')
+                    
+                    with ui.row().classes('w-full items-end'):
+                        # Get today's date for default values
+                        today = datetime.today().strftime('%Y-%m-%d')
+                        
+                        # First date components - following same pattern as in layouts.py
+                        start_date_input_macro = ui.input('Start Date', value=today).classes('w-24 md:w-32')
+                        start_date_input_macro.props('dense outlined readonly')
+                        
+                        with ui.menu().props('no-parent-event') as start_menu_macro:
+                            with ui.date(value=today).bind_value(start_date_input_macro):
+                                with ui.row().classes('justify-end q-pa-sm'):
+                                    ui.button('Done', on_click=start_menu_macro.close).props('flat color=primary')
+                        
+                        with start_date_input_macro.add_slot('append'):
+                            ui.icon('event').on('click', start_menu_macro.open).classes('cursor-pointer')
+                            
+                        # Start hour
+                        start_hour_macro = ui.number(value=0, min=0, max=23, step=1, format='%d').classes('w-16')
+                        start_hour_macro.props('dense outlined label="Hour"')
+                        
+                        # Separator
+                        ui.label('to').classes('mx-2')
+                        
+                        # End date components
+                        end_date_input_macro = ui.input('End Date', value=today).classes('w-24 md:w-32')
+                        end_date_input_macro.props('dense outlined readonly')
+                        
+                        with ui.menu().props('no-parent-event') as end_menu_macro:
+                            with ui.date(value=today).bind_value(end_date_input_macro):
+                                with ui.row().classes('justify-end q-pa-sm'):
+                                    ui.button('Done', on_click=end_menu_macro.close).props('flat color=primary')
+                        
+                        with end_date_input_macro.add_slot('append'):
+                            ui.icon('event').on('click', end_menu_macro.open).classes('cursor-pointer')
+                            
+                        # End hour
+                        end_hour_macro = ui.number(value=23, min=0, max=23, step=1, format='%d').classes('w-16')
+                        end_hour_macro.props('dense outlined label="Hour"')
+                        
+                        # User selection - use the function from layouts.py
+                        user_select_macro, refresh_users_macro = create_user_selector(width='w-64 md:w-80 ml-auto')
+                    
+                    # Analysis options
+                    with ui.row().classes('w-full mt-4 items-center'):
+                        ui.label('Analysis Options:').classes('mr-4')
+                        
+                        with ui.card().classes('w-full p-4'):
+                            with ui.row().classes('items-center justify-between'):
+                                max_summaries = ui.number(value=50, min=1, max=200, label='Max Summaries').classes('w-40')
+                                max_summaries.props('outlined')
+                                
+                                model_select = ui.select(
+                                    options=['gpt-4o', 'gpt-3.5-turbo'], 
+                                    value='gpt-4o',
+                                    label='Model'
+                                ).classes('w-40')
+                                
+                                # Generate analysis button
+                                analyze_btn = ui.button('Generate Analysis', icon='analytics', on_click=lambda: generate_analysis())
+                                analyze_btn.props('color=primary')
+                    
+                    # Results container for analysis
+                    analysis_container = ui.column().classes('w-full mt-4 border rounded p-4')
+                    
+                    # Placeholder text for empty results
+                    with analysis_container:
+                        ui.label('Select date range and users, then click "Generate Analysis"').classes('text-gray-500 italic text-center w-full py-8')
+                    
+                    # Function to generate and display analysis
+                    def generate_analysis():
+                        # Get selected values
+                        start_dt = start_date_input_macro.value
+                        start_hr = int(start_hour_macro.value)
+                        end_dt = end_date_input_macro.value
+                        end_hr = int(end_hour_macro.value)
+                        selected_users = user_select_macro.value
+                        max_items = int(max_summaries.value)
+                        model = model_select.value
+                        
+                        # Clear previous results
+                        analysis_container.clear()
+                        
+                        # Validate inputs
+                        if not start_dt or not end_dt:
+                            with analysis_container:
+                                ui.label('Please select both start and end dates').classes('text-negative text-h6')
+                            return
+                        
+                        if not selected_users:
+                            with analysis_container:
+                                ui.label('Please select at least one user').classes('text-negative text-h6')
+                            return
+                        
+                        # Show loading state
+                        with analysis_container:
+                            ui.label('Fetching and analyzing conversation summaries...').classes('text-h6 mb-2')
+                            loading_spinner = ui.spinner('dots', size='lg').classes('text-primary')
+                        
+                        # Configure the analyzer with the selected model
+                        global summary_analyzer
+                        summary_analyzer = SummaryAnalyzer(model_name=model)
+                        
+                        try:
+                            # Fetch summaries from database
+                            summaries = user_db.get_summaries_by_date_range(
+                                start_date=start_dt,
+                                start_hour=start_hr,
+                                end_date=end_dt,
+                                end_hour=end_hr,
+                                user_ids=selected_users,
+                                limit=max_items
+                            )
+                            
+                            if not summaries:
+                                analysis_container.clear()
+                                with analysis_container:
+                                    ui.label('No conversation summaries found for the selected criteria').classes('text-h6 mt-4 text-center')
+                                return
+                            
+                            # Analyze summaries
+                            analyzed_data = summary_analyzer.analyze_multiple_summaries(summaries)
+                            
+                            # Save analysis results to database
+                            analysis_results = []
+                            for item in analyzed_data:
+                                analysis_results.append({
+                                    'summary_id': item['summary_id'], 
+                                    'analysis': json.dumps(item['analysis'])
+                                })
+                            
+                            user_db.save_analysis_results(analysis_results)
+                            
+                            # Clear loading state and display results
+                            analysis_container.clear()
+                            
+                            # Display analysis summary
+                            with analysis_container:
+                                ui.label('Macro Analysis Results').classes('text-h5 mb-4')
+                                
+                                # Summary stats
+                                with ui.card().classes('w-full mb-4 p-4'):
+                                    ui.label('Summary Statistics').classes('text-h6 mb-2')
+                                    
+                                    with ui.row().classes('w-full justify-between'):
+                                        ui.label(f'Total Conversations: {len(analyzed_data)}').classes('text-subtitle1')
+                                        ui.label(f'Date Range: {start_dt} to {end_dt}').classes('text-subtitle1')
+                                        ui.label(f'Analysis Model: {model}').classes('text-subtitle1')
+                                
+                                # Display topic heatmap
+                                with ui.card().classes('w-full mb-4 p-4'):
+                                    ui.label('Topic Sentiment Analysis').classes('text-h6 mb-2')
+                                    topic_heatmap = summary_analyzer.generate_topic_heatmap(analyzed_data)
+                                    ui.plotly(topic_heatmap).classes('w-full h-[400px]')
+                                
+                                # Display satisfaction chart
+                                with ui.row().classes('w-full gap-4'):
+                                    with ui.card().classes('w-1/2 p-4'):
+                                        ui.label('User Satisfaction').classes('text-h6 mb-2')
+                                        satisfaction_chart = summary_analyzer.generate_satisfaction_chart(analyzed_data)
+                                        ui.plotly(satisfaction_chart).classes('w-full h-[350px]')
+                                    
+                                    with ui.card().classes('w-1/2 p-4'):
+                                        ui.label('Conversation Types').classes('text-h6 mb-2')
+                                        types_chart = summary_analyzer.generate_conversation_types_chart(analyzed_data)
+                                        ui.plotly(types_chart).classes('w-full h-[350px]')
+                                
+                                # Display top questions table
+                                with ui.card().classes('w-full mb-4 p-4'):
+                                    ui.label('Top User Questions').classes('text-h6 mb-2')
+                                    questions_table = summary_analyzer.generate_top_questions_table(analyzed_data, top_n=15)
+                                    ui.plotly(questions_table).classes('w-full')
+                                
+                                # Display action items table
+                                with ui.card().classes('w-full mb-4 p-4'):
+                                    ui.label('Key Action Items').classes('text-h6 mb-2')
+                                    
+                                    # Extract and count action items
+                                    all_actions = []
+                                    for item in analyzed_data:
+                                        if 'analysis' in item and 'action_items' in item['analysis']:
+                                            all_actions.extend(item['analysis']['action_items'])
+                                    
+                                    action_counts = Counter(all_actions).most_common(15)
+                                    
+                                    # Create a table to display action items
+                                    if action_counts:
+                                        columns = [
+                                            {'name': 'action', 'label': 'Action Item', 'field': 'action', 'align': 'left'},
+                                            {'name': 'count', 'label': 'Frequency', 'field': 'count', 'align': 'center'}
+                                        ]
+                                        
+                                        rows = [{'action': action, 'count': count} for action, count in action_counts]
+                                        
+                                        ui.table(
+                                            columns=columns,
+                                            rows=rows,
+                                            row_key='action'
+                                        ).props('flat bordered dense').classes('w-full')
+                                    else:
+                                        ui.label('No action items found').classes('text-gray-500 italic')
+                                
+                                # Show the detailed analysis for each conversation
+                                with ui.expansion('View Individual Conversation Analysis', icon='list').classes('w-full'):
+                                    for item in analyzed_data:
+                                        if 'analysis' not in item:
+                                            continue
+                                            
+                                        with ui.card().classes('w-full mb-4 p-4'):
+                                            with ui.row().classes('justify-between items-center'):
+                                                ui.label(f"User {item['user_id']} - {item['created_at'].strftime('%Y-%m-%d %H:%M') if 'created_at' in item else 'Unknown date'}").classes('text-subtitle1 font-bold')
+                                                ui.label(f"Session: {item['session_id'][:8]}...").classes('text-xs text-gray-500')
+                                            
+                                            ui.separator()
+                                            
+                                            with ui.column().classes('w-full mt-2'):
+                                                # Main intent
+                                                ui.label(f"Main Intent: {item['analysis'].get('main_intent', 'Unknown')}").classes('font-bold')
+                                                
+                                                # Satisfaction score
+                                                satisfaction = item['analysis'].get('user_satisfaction', 0)
+                                                satisfaction_color = ['red', 'orange', 'yellow', 'blue', 'green'][min(satisfaction-1, 4)] if 1 <= satisfaction <= 5 else 'gray'
+                                                
+                                                ui.label(f"Satisfaction: {satisfaction}/5").classes(f'text-{satisfaction_color}-500')
+                                                
+                                                # Show topics with their sentiment and importance
+                                                if 'topics' in item['analysis'] and item['analysis']['topics']:
+                                                    ui.label("Topics:").classes('mt-2 font-bold')
+                                                    
+                                                    for topic in item['analysis']['topics']:
+                                                        sentiment = topic.get('sentiment', 'neutral')
+                                                        importance = topic.get('importance', 3)
+                                                        
+                                                        # Set color based on sentiment
+                                                        sentiment_color = {
+                                                            'positive': 'green',
+                                                            'negative': 'red',
+                                                            'neutral': 'gray',
+                                                            'mixed': 'blue'
+                                                        }.get(sentiment, 'gray')
+                                                        
+                                                        with ui.row().classes('items-center'):
+                                                            ui.label(f"{topic.get('topic', 'Unknown topic')}").classes('font-medium')
+                                                            ui.label(f"[{sentiment}]").classes(f'text-{sentiment_color}-500 text-xs ml-2')
+                                                            ui.label(f"(Importance: {importance}/5)").classes('text-xs ml-2')
+                                                
+                                                # Show conversation summary
+                                                ui.label("Summary:").classes('mt-2 font-bold')
+                                                ui.markdown(item.get('summary', 'No summary available')).classes('text-sm')
+                        
+                        except Exception as e:
+                            print(f"Error generating analysis: {e}")
+                            
+                            analysis_container.clear()
+                            with analysis_container:
+                                ui.label(f'Error: {str(e)}').classes('text-negative')
+                    
+                    # Add help information at the bottom
+                    with ui.expansion('How to use Macro Analysis', icon='help').classes('w-full mt-4'):
+                        ui.markdown("""
+                        ### Understanding Macro Analysis
+                        
+                        This tool provides aggregated insights across multiple conversations to identify patterns and trends.
+                        
+                        **Key Features:**
+                        - **Topic Sentiment Analysis**: Visualizes common topics and associated sentiments
+                        - **User Satisfaction**: Measures overall satisfaction levels across conversations
+                        - **Conversation Types**: Categorizes conversations by their primary purpose
+                        - **Key Questions**: Identifies the most frequent questions asked by users
+                        - **Action Items**: Highlights the most common next steps or action items
+                        
+                        **How to use:**
+                        1. Select a date range and user(s)
+                        2. Set the maximum number of summaries to analyze
+                        3. Choose the AI model (GPT-4o recommended for best results)
+                        4. Click "Generate Analysis"
+                        5. Explore the visualizations and tables to understand conversation patterns
+                        
+                        The analysis is saved to the database, so you can quickly retrieve it in the future.
+                        """)
+        
         # Add CSS classes to make rows appear clickable
         ui.add_head_html('''
         <style>
