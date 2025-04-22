@@ -314,7 +314,7 @@ def page_admin():
                     # Control buttons row
                     with ui.row().classes('w-full justify-between mt-4'):
                         # Refresh users button
-                        refresh_users_btn = ui.button('Refresh Users', icon='refresh', on_click=lambda: refresh_users()).props('flat')
+                        #refresh_users_btn = ui.button('Refresh Users', icon='refresh', on_click=lambda: refresh_users()).props('flat')
                         
                         # Generate summaries button
                         generate_btn = ui.button('Generate Summaries', icon='analytics', on_click=lambda: generate_summaries())
@@ -327,13 +327,13 @@ def page_admin():
                     with results_container:
                         ui.label('Select date range and users, then click "Generate Summaries"').classes('text-gray-500 italic text-center w-full py-8')
                     
-                    # Function to generate summaries (will be implemented later)
+                    # Function to generate summaries
                     def generate_summaries():
                         # Get selected values
                         start_dt = start_date_input.value
-                        start_hr = start_hour.value
+                        start_hr = int(start_hour.value)
                         end_dt = end_date_input.value
-                        end_hr = end_hour.value
+                        end_hr = int(end_hour.value)
                         selected_users = user_select.value
                         
                         # Format datetime for display
@@ -354,9 +354,9 @@ def page_admin():
                                 ui.label('Please select at least one user').classes('text-negative text-h6')
                             return
                         
-                        # Add placeholder message for now
+                        # Add placeholder message for UI
                         with results_container:
-                            ui.label('Generating summaries...').classes('text-h6 mb-2')
+                            ui.label('Fetching conversations...').classes('text-h6 mb-2')
                             ui.separator()
                             
                             # Display selection criteria
@@ -373,7 +373,55 @@ def page_admin():
                                 else:
                                     ui.label('Selected Users: None')
                                 
-                            ui.label('This feature will be implemented in the next phase').classes('text-gray-500 italic mt-4')
+                            ui.label('Check terminal for debug output').classes('text-primary mt-4')
+                        
+                        try:
+                            # Fetch conversations from database using new method
+                            print(f"\n=== FETCHING CONVERSATIONS ===")
+                            print(f"Date Range: {start_formatted} to {end_formatted}")
+                            print(f"Selected Users: {selected_users}")
+                            
+                            conversations = user_db.get_conversations_by_date_and_users(
+                                start_date=start_dt,
+                                start_hour=start_hr,
+                                end_date=end_dt,
+                                end_hour=end_hr,
+                                user_ids=selected_users
+                            )
+                            
+                            # Print conversation data to terminal
+                            print(f"\nFound {len(conversations)} conversations")
+                            
+                            for i, conv in enumerate(conversations):
+                                print(f"\nConversation {i+1}:")
+                                print(f"  Session ID: {conv['session_id']}")
+                                print(f"  User ID: {conv['user_id']}")
+                                print(f"  User Session ID: {conv['user_session_id']}")
+                                print(f"  Start Time: {conv['start_time'].strftime('%Y-%m-%d %H:%M:%S')}")
+                                print(f"  End Time: {conv['end_time'].strftime('%Y-%m-%d %H:%M:%S')}")
+                                print(f"  Message Count: {conv['message_count']}")
+                                
+                                # Print first message preview
+                                if conv['messages']:
+                                    first_msg = conv['messages'][0]
+                                    print(f"  First Message: [{first_msg['role']}] {first_msg['content'][:50]}...")
+                                
+                                print(f"  Total Messages: {len(conv['messages'])}")
+                            
+                            print("\n=== END OF CONVERSATIONS ===\n")
+                            
+                            # Update UI with minimal info
+                            with results_container:
+                                ui.label(f'Found {len(conversations)} conversations').classes('text-subtitle1 mt-4 font-bold')
+                                ui.label('Debug data printed to terminal. Summarization will be implemented in the next phase.').classes('text-gray-500 italic mt-4')
+                            
+                        except Exception as e:
+                            # Print error to terminal
+                            print(f"\nERROR fetching conversations: {str(e)}")
+                            
+                            # Show error in UI
+                            with results_container:
+                                ui.label(f'Error: {str(e)}').classes('text-negative')
 
         # Add CSS classes to make rows appear clickable
         ui.add_head_html('''
