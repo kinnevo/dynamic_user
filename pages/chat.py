@@ -72,12 +72,55 @@ async def chat_page():
         """Display chat messages from the database"""
         messages_container.clear()
         
+        # Try to get session from browser storage first
         session_id = app.storage.browser.get('session_id', None)
+        
+        # If no session in browser storage, try to retrieve from localStorage
         if not session_id:
+            try:
+                # Direct localStorage check with higher timeout
+                storage_data = await ui.run_javascript("""
+                    const sessionId = localStorage.getItem('persistent_session_id');
+                    const userId = localStorage.getItem('persistent_user_id');
+                    
+                    if (sessionId && userId) {
+                        return {
+                            exists: true,
+                            session_id: sessionId,
+                            user_id: userId
+                        };
+                    }
+                    return { exists: false };
+                """, timeout=5)
+                
+                # If we have localStorage data, use it
+                if storage_data and storage_data.get('exists', False):
+                    session_id = storage_data.get('session_id')
+                    # Update app storage with localStorage values - with error handling
+                    try:
+                        app.storage.browser['session_id'] = session_id
+                        app.storage.browser['user_id'] = storage_data.get('user_id')
+                    except TypeError:
+                        # If browser storage is locked, just use the local variable
+                        print("Browser storage already locked in display_messages")
+                        # session_id is already set above for local use
+                    print(f"Chat: Restored session from localStorage: {session_id}")
+            except Exception as e:
+                print(f"Error checking localStorage in chat: {e}")
+        
+        # If still no session_id, can't display messages
+        if not session_id:
+            with ui.element('div').classes('self-start bg-gray-200 p-3 rounded-lg max-w-[80%]'):
+                ui.markdown("*No active session. Please start a conversation.*")
             return
         
         # Get recent messages
         messages = db_adapter.get_recent_messages(session_id, limit=50)
+        
+        if not messages:
+            with ui.element('div').classes('self-start bg-gray-200 p-3 rounded-lg max-w-[80%]'):
+                ui.markdown("*No messages yet. Start a conversation!*")
+            return
         
         for message in messages:
             if message['role'] == 'user':
@@ -100,20 +143,88 @@ async def chat_page():
                 if not message_input.value:
                     return
                 
-                # Get session info
+                # Get session info - first from browser storage, then from localStorage
                 session_id = app.storage.browser.get('session_id', None)
                 user_id = app.storage.browser.get('user_id', None)
                 
-                if not session_id:
-                    # Create a new session ID if missing
-                    session_id = str(uuid.uuid4())
-                    app.storage.browser['session_id'] = session_id
-                
-                if not user_id:
-                    # Create a new user ID if missing
-                    user_id = db_adapter.create_user(session_id)
-                    app.storage.browser['user_id'] = user_id
-                    ui.notify('Session initialized', type='positive')
+                # Only try to get or create session if we don't have one already
+                if not session_id or not user_id:
+                    try:
+                        # Direct localStorage check with higher timeout
+                        storage_data = await ui.run_javascript("""
+                            const sessionId = localStorage.getItem('persistent_session_id');
+                            const userId = localStorage.getItem('persistent_user_id');
+                            
+                            if (sessionId && userId) {
+                                return {
+                                    exists: true,
+                                    session_id: sessionId,
+                                    user_id: userId
+                                };
+                            }
+                            return { exists: false };
+                        """, timeout=5)
+                        
+                        # If we have localStorage data, use it
+                        if storage_data and storage_data.get('exists', False):
+                            print(f"Chat: Restoring existing session: {storage_data.get('session_id')}")
+                            # Restore from localStorage
+                            session_id = storage_data.get('session_id')
+                            user_id = storage_data.get('user_id')
+                            
+                            # Update app storage with localStorage values - with error handling
+                            try:
+                                app.storage.browser['session_id'] = session_id
+                                app.storage.browser['user_id'] = user_id
+                            except TypeError:
+                                # If browser storage is locked, we can't update it but can still use the session values
+                                print("Browser storage already locked in chat, using session values in memory only")
+                                pass
+                        else:
+                            # No session in localStorage - genuinely new session required
+                            print("Chat: Creating new session and user (first time visitor)")
+                            session_id = str(uuid.uuid4())
+                            user_id = db_adapter.create_user(session_id)
+                            
+                            # Update browser storage with error handling
+                            try:
+                                app.storage.browser['session_id'] = session_id
+                                app.storage.browser['user_id'] = user_id
+                            except TypeError:
+                                # If browser storage is locked, we can't update it
+                                print("Browser storage already locked when creating new session in chat")
+                                # We can still use the values locally
+                            
+                            # Store in localStorage for persistence - don't await (fire and forget)
+                            ui.run_javascript(f"""
+                                localStorage.setItem('persistent_session_id', '{session_id}');
+                                localStorage.setItem('persistent_user_id', '{user_id}');
+                                console.log('Chat created new session:', {{ session_id: '{session_id}', user_id: '{user_id}' }});
+                            """)
+                            
+                            ui.notify('New session initialized', type='positive')
+                    except Exception as e:
+                        # If there's any error with JavaScript, create a new session
+                        print(f"Error checking localStorage in chat send_message: {e}")
+                        session_id = str(uuid.uuid4())
+                        user_id = db_adapter.create_user(session_id)
+                        
+                        # Update browser storage with error handling  
+                        try:
+                            app.storage.browser['session_id'] = session_id
+                            app.storage.browser['user_id'] = user_id
+                        except TypeError:
+                            # If browser storage is locked, we can't update it
+                            print("Browser storage already locked when handling errors in chat")
+                            # Session and user_id variables are still available locally
+                        
+                        # Try to store in localStorage - don't await
+                        ui.run_javascript(f"""
+                            localStorage.setItem('persistent_session_id', '{session_id}');
+                            localStorage.setItem('persistent_user_id', '{user_id}');
+                        """)
+                        
+                        ui.notify('New session created', type='positive')
                 
                 message = message_input.value
                 message_input.value = ''
