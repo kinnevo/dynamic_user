@@ -1,6 +1,6 @@
 from nicegui import ui, app
 import uuid
-from utils.state import logout, update_user_status, set_user_logout_state
+from utils.state import logout, update_user_status, set_user_logout_state, set_post_logout_session
 from utils.database import PostgresAdapter
 from utils.layouts import create_navigation_menu_2
 
@@ -37,6 +37,17 @@ async def get_visit_count() -> int:
             storage_data = await ui.run_javascript("""
                 const sessionId = localStorage.getItem('persistent_session_id');
                 const userId = localStorage.getItem('persistent_user_id');
+                const loggedOut = localStorage.getItem('logged_out');
+                
+                // Check if user has logged out
+                if (loggedOut === 'true') {
+                    // Clear the logged_out flag
+                    localStorage.removeItem('logged_out');
+                    return {
+                        exists: false,
+                        logged_out: true
+                    };
+                }
                 
                 // Return the data if it exists
                 if (sessionId && userId) {
@@ -52,14 +63,18 @@ async def get_visit_count() -> int:
             # Check if we have data in localStorage
             if storage_data and storage_data.get('exists', False):
                 # Use existing localStorage session
+                # Set the session ID in the post-logout tracker
+                session_id = storage_data['session_id']
+                set_post_logout_session(session_id)
+                print(f"Setting post-logout session to existing: {session_id}")
+                
                 try:
-                    app.storage.browser['session_id'] = storage_data['session_id']
+                    app.storage.browser['session_id'] = session_id
                     app.storage.browser['user_id'] = storage_data['user_id']
                 except TypeError:
                     # If browser storage is locked, we can't update it
                     print("Browser storage already locked, session restore saved in memory only")
-                    # Still store the values locally for the current function
-                    session_id = storage_data['session_id']
+                    # session_id is already set above for local use
                     user_id = storage_data['user_id']
                 should_reset = False
                 print(f"Restored session from localStorage: {storage_data['session_id']}")
@@ -88,6 +103,10 @@ async def get_visit_count() -> int:
         # Generate new IDs
         new_session_id = str(uuid.uuid4())
         new_user_id = db_adapter.create_user(new_session_id)
+        
+        # Set the post-logout session ID to handle message retrieval after logout
+        set_post_logout_session(new_session_id)
+        print(f"Setting post-logout session to: {new_session_id}")
         
         # Update app storage with error handling
         try:
@@ -124,23 +143,20 @@ async def get_visit_count() -> int:
         print("Browser storage already locked, can't initialize visits")
         pass
     
-    # Safely update visit count
+    # Simplified visit count approach - use a fixed value on first session creation
+    # and don't worry about persisting it - the user ID is what matters
     try:
-        # Only try to increment if we can still modify the browser storage
-        current_visits = app.storage.browser.get('visits', 0)
-        new_visits = current_visits + 1
-        
-        # Try to update browser storage
-        try:
-            app.storage.browser['visits'] = new_visits
-        except TypeError:
-            # If we can't modify browser storage anymore, just return the incremented value
-            pass
-            
-        return new_visits
+        if should_reset:
+            # If we're creating a new session, always return 1
+            return 1
+        else:
+            # If using existing session, return a simple incremented value
+            # This simplifies the logic and avoids browser storage issues
+            current_visits = app.storage.browser.get('visits', 0)
+            return current_visits + 1
     except Exception as e:
-        print(f"Error updating visit count: {e}")
-        return app.storage.browser.get('visits', 1)  # Default to 1 if we can't read/update visits
+        print(f"Error handling visit count: {e}")
+        return 1  # Default to 1 if anything goes wrong
 
 @ui.page('/home')
 async def home():

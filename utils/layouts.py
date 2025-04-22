@@ -1,5 +1,5 @@
 from nicegui import ui, app
-from utils.state import set_user_logout_state
+from utils.state import set_user_logout_state, set_post_logout_session
 from utils.database import PostgresAdapter
 from datetime import datetime
 
@@ -29,21 +29,23 @@ def create_navigation_menu(current_page: str):
 
 def clearSessionAndRedirect():
     """Clear user session and redirect to home page with new session parameter"""
-    # Setting the logout state to true
+    # Setting the logout state to true - this will trigger a new session on next page load
     set_user_logout_state(True)
     
-    # Clear app.storage.browser directly to ensure session is reset on server side
-    if 'session_id' in app.storage.browser:
-        del app.storage.browser['session_id']
-    if 'user_id' in app.storage.browser:
-        del app.storage.browser['user_id']
-    if 'visits' in app.storage.browser:
-        del app.storage.browser['visits']
+    # Clear the post-logout session - this ensures a new one will be created
+    set_post_logout_session(None)
     
-    # Clear localStorage and redirect - no need to await this
+    # We don't need to clear app.storage.browser here - instead we'll do everything client-side
+    # This avoids the "response already built" error
+    
+    # Clear localStorage and redirect - client-side approach
     ui.run_javascript("""
         try {
-            // Clear only our specific items from localStorage
+            // First set a logout flag in localStorage so we know to create a new session
+            // This needs to persist after the redirect!
+            localStorage.setItem('logged_out', 'true');
+            
+            // Clear our specific session items from localStorage
             localStorage.removeItem('persistent_session_id');
             localStorage.removeItem('persistent_user_id');
             
@@ -51,16 +53,23 @@ def clearSessionAndRedirect():
             sessionStorage.clear();
             
             console.log('Session cleared, redirecting to new session');
+            
+            // Show a notification
+            if (typeof $notifyInfo === 'function') {
+                $notifyInfo('Sesión eliminada correctamente');
+            }
         } catch (e) {
             console.error('Error clearing session storage:', e);
         }
         
-        // Redirect to home page with special parameter
-        window.location.href = '/home?newSession=true';
+        // Force reload instead of navigation - this ensures a complete reset
+        setTimeout(() => {
+            // Using window.location.href to ensure a full page reload
+            window.location.href = '/home?newSession=true&t=' + Date.now();
+        }, 100);
     """)
     
-    # This notification might not show since we're redirecting
-    ui.notify('Sesión eliminada correctamente', type='positive', timeout=1000)
+    # We don't need a server-side notification since we're handling it client-side
 
 def create_navigation_menu_2():
     with ui.header().classes('items-center justify-between'):

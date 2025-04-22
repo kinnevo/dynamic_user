@@ -4,6 +4,7 @@ from utils.message_router import MessageRouter
 from utils.layouts import create_navigation_menu_2
 from utils.database import PostgresAdapter
 from utils.langflow_client import LangflowClient
+from utils.state import set_post_logout_session
 
 # Initialize components
 message_router = MessageRouter()
@@ -82,6 +83,17 @@ async def chat_page():
                 storage_data = await ui.run_javascript("""
                     const sessionId = localStorage.getItem('persistent_session_id');
                     const userId = localStorage.getItem('persistent_user_id');
+                    const loggedOut = localStorage.getItem('logged_out');
+                    
+                    // Check if user has logged out
+                    if (loggedOut === 'true') {
+                        // Clear the logged_out flag
+                        localStorage.removeItem('logged_out');
+                        return {
+                            exists: false,
+                            logged_out: true
+                        };
+                    }
                     
                     if (sessionId && userId) {
                         return {
@@ -105,6 +117,12 @@ async def chat_page():
                         print("Browser storage already locked in display_messages")
                         # session_id is already set above for local use
                     print(f"Chat: Restored session from localStorage: {session_id}")
+                elif storage_data and storage_data.get('logged_out', False):
+                    # If the user has logged out, we should not show any messages
+                    print("User has logged out, not displaying old messages")
+                    with ui.element('div').classes('self-start bg-gray-200 p-3 rounded-lg max-w-[80%]'):
+                        ui.markdown("*You have started a new session. Previous messages won't be displayed.*")
+                    return
             except Exception as e:
                 print(f"Error checking localStorage in chat: {e}")
         
@@ -165,8 +183,35 @@ async def chat_page():
                             return { exists: false };
                         """, timeout=5)
                         
-                        # If we have localStorage data, use it
-                        if storage_data and storage_data.get('exists', False):
+                        # Check if user has logged out first
+                        if storage_data and storage_data.get('logged_out', False):
+                            print("User has logged out, creating new session in chat")
+                            # Create new session after logout
+                            session_id = str(uuid.uuid4())
+                            user_id = db_adapter.create_user(session_id)
+                            
+                            # Update the global post-logout session tracker
+                            set_post_logout_session(session_id)
+                            print(f"Chat: Setting post-logout session to: {session_id}")
+                            
+                            # Update app storage with error handling
+                            try:
+                                app.storage.browser['session_id'] = session_id
+                                app.storage.browser['user_id'] = user_id
+                            except TypeError:
+                                print("Browser storage already locked when creating session after logout")
+                                # Still have local variables for this request
+                            
+                            # Store in localStorage
+                            ui.run_javascript(f"""
+                                localStorage.setItem('persistent_session_id', '{session_id}');
+                                localStorage.setItem('persistent_user_id', '{user_id}');
+                                console.log('Created new post-logout session:', {{ session_id: '{session_id}', user_id: '{user_id}' }});
+                            """)
+                            
+                            ui.notify('Started new chat session', type='positive')
+                        # If we have regular localStorage data, use it
+                        elif storage_data and storage_data.get('exists', False):
                             print(f"Chat: Restoring existing session: {storage_data.get('session_id')}")
                             # Restore from localStorage
                             session_id = storage_data.get('session_id')
@@ -185,6 +230,10 @@ async def chat_page():
                             print("Chat: Creating new session and user (first time visitor)")
                             session_id = str(uuid.uuid4())
                             user_id = db_adapter.create_user(session_id)
+                            
+                            # Update the global post-logout session
+                            set_post_logout_session(session_id)
+                            print(f"Chat: Setting post-logout session to new first-time session: {session_id}")
                             
                             # Update browser storage with error handling
                             try:
@@ -208,6 +257,10 @@ async def chat_page():
                         print(f"Error checking localStorage in chat send_message: {e}")
                         session_id = str(uuid.uuid4())
                         user_id = db_adapter.create_user(session_id)
+                        
+                        # Update the global post-logout session
+                        set_post_logout_session(session_id)
+                        print(f"Chat: Setting post-logout session to new fallback session: {session_id}")
                         
                         # Update browser storage with error handling  
                         try:

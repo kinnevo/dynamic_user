@@ -193,9 +193,33 @@ class PostgresAdapter(DatabaseInterface):
         Returns:
             List of recent fi_messages
         """
-        conn = self.connection_pool.getconn()
+        # Check if we should use a post-logout session ID instead
+        # This handles the case where a user has logged out and we need to use the new session
+        from utils.state import get_post_logout_session
+        
+        # Get the post-logout session (if there is one)
+        post_logout_session = get_post_logout_session()
+        
+        # If we have a post-logout session, use that instead
+        # This ensures we don't show old messages after logout
+        if post_logout_session is not None:
+            # Override the provided session_id with our post-logout session
+            print(f"Using post-logout session ({post_logout_session}) instead of provided session ({session_id})")
+            session_id = post_logout_session
+            
+        # Create a new connection for this request (don't reuse pool connections to avoid issues)
         try:
-            with conn.cursor(cursor_factory=DictCursor) as cursor:
+            # Create a new connection for this specific request
+            connection = psycopg2.connect(
+                host=os.getenv('POSTGRES_HOST'),
+                database=os.getenv('POSTGRES_DB'),
+                user=os.getenv('POSTGRES_USER'),
+                password=os.getenv('POSTGRES_PASSWORD'),
+                port=os.getenv('POSTGRES_PORT', '5432')
+            )
+            
+            # Use the connection for this specific query
+            with connection.cursor(cursor_factory=DictCursor) as cursor:
                 cursor.execute(
                     "SELECT * FROM fi_messages WHERE session_id = %s ORDER BY timestamp DESC LIMIT %s",
                     (session_id, limit)
@@ -205,10 +229,14 @@ class PostgresAdapter(DatabaseInterface):
                 
                 # Reverse to get chronological order
                 recent_messages.reverse()
-                
                 return recent_messages
+        except Exception as e:
+            print(f"Error fetching messages: {e}")
+            return []  # Return empty list on error
         finally:
-            self.connection_pool.putconn(conn)
+            # Always close the connection
+            if 'connection' in locals() and connection:
+                connection.close()
     
     def create_user(self, session_id: str) -> int:
         """
