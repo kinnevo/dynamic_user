@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
-import functools
 from nicegui import ui
 from datetime import datetime
 import json
 import plotly.graph_objects as go
 import plotly.express as px
 import pandas as pd
-from collections import Counter
 
 # Use the specific imports from your snippet
 from utils.layouts import create_navigation_menu_2, create_date_range_selector, create_user_selector
@@ -149,14 +147,22 @@ def page_admin():
         ui.label('FastInnovation Admin').classes('text-h4 q-mb-md')
 
         # Create tabs for different admin panels with persistent visibility
-        with ui.tabs().classes('w-full').props('no-swipe-select keep-alive') as tabs:
+        with ui.tabs().classes('w-full').props('no-swipe-select keep-alive active-class="bg-primary text-white"') as tabs:
             ui.tab('Users Table', icon='people')
             ui.tab('Conversation Summaries', icon='summarize')
             ui.tab('Macro Analysis', icon='analytics')
         
+        # Create a local variable to track the tab
+        current_tab = 'Users Table'
+        
         # Store the current tab value in a shared state for persistence
         def on_tab_change(new_tab):
             print(f"Tab changed to: {new_tab}")
+            nonlocal current_tab
+            current_tab = new_tab
+            
+        # Set initial tab to first tab
+        tabs.set_value('Users Table')
         
         tabs.on('update:model-value', on_tab_change)
         
@@ -642,6 +648,9 @@ def page_admin():
                                 
                                 # Define generate_analysis function in advance 
                                 async def generate_macro_analysis():
+                                    # Force the tab to stay on Macro Analysis right at the beginning
+                                    tabs.set_value("Macro Analysis")
+                                    
                                     try:
                                         # Get selected values
                                         start_dt = start_date_input_macro.value
@@ -652,27 +661,35 @@ def page_admin():
                                         max_items = int(max_summaries_macro.value)
                                         model = model_select_macro.value
                                         
-                                        # Force the tab to stay on Macro Analysis
-                                        tabs.set_value("Macro Analysis")
-                                        
                                         # Clear previous results
                                         analysis_container.clear()
                                         
-                                        # Validate inputs
+                                        # Validate inputs with force tab
                                         if not start_dt or not end_dt:
                                             with analysis_container:
                                                 ui.label('Please select both start and end dates').classes('text-negative text-h6')
+                                                # Add a retry button
+                                                ui.button('Try Again', icon='refresh', on_click=generate_macro_analysis).props('color=primary mt-4')
+                                            # Force the tab to stay on Macro Analysis
+                                            tabs.set_value("Macro Analysis")
                                             return
                                         
                                         if not selected_users:
                                             with analysis_container:
                                                 ui.label('Please select at least one user').classes('text-negative text-h6')
+                                                # Add a retry button
+                                                ui.button('Try Again', icon='refresh', on_click=generate_macro_analysis).props('color=primary mt-4')
+                                            # Force the tab to stay on Macro Analysis
+                                            tabs.set_value("Macro Analysis")
                                             return
                                         
                                         # Show loading state
                                         with analysis_container:
                                             ui.label('Fetching and analyzing conversation summaries...').classes('text-h6 mb-2')
                                             loading_spinner = ui.spinner('dots', size='lg').classes('text-primary')
+                                        
+                                        # Force tab again after showing loading state
+                                        tabs.set_value("Macro Analysis")
                                         
                                         # Configure the analyzer with the selected model
                                         global summary_analyzer
@@ -696,10 +713,17 @@ def page_admin():
                                         
                                         print(f"Found {len(summaries)} summaries to analyze")
                                         
+                                        # Force tab after database query
+                                        tabs.set_value("Macro Analysis")
+                                        
                                         if not summaries:
                                             analysis_container.clear()
                                             with analysis_container:
                                                 ui.label('No conversation summaries found for the selected criteria').classes('text-h6 mt-4 text-center')
+                                                # Add a retry button
+                                                ui.button('Try Again', icon='refresh', on_click=generate_macro_analysis).props('color=primary mt-4')
+                                            # Force the tab to stay on Macro Analysis
+                                            tabs.set_value("Macro Analysis")
                                             return
                                         
                                         # Update UI to show progress
@@ -707,6 +731,9 @@ def page_admin():
                                         with analysis_container:
                                             ui.label(f'Found {len(summaries)} summaries. Starting analysis...').classes('text-h6 mb-2')
                                             loading_spinner = ui.spinner('dots', size='lg').classes('text-primary')
+                                        
+                                        # Force tab after clearing container
+                                        tabs.set_value("Macro Analysis")
                                         
                                         # Analyze summaries
                                         print("\n=== STARTING ANALYSIS ===")
@@ -719,6 +746,9 @@ def page_admin():
                                                 with analysis_container:
                                                     ui.label(f'Analyzing summary {i+1} of {len(summaries)}...').classes('text-h6 mb-2')
                                                     loading_spinner = ui.spinner('dots', size='lg').classes('text-primary')
+                                                
+                                                # Force tab after progress update
+                                                tabs.set_value("Macro Analysis")
                                                 
                                                 # Add to analyzed data
                                                 result = summary_analyzer.analyze_summary(summary.get('summary', ''))
@@ -742,8 +772,8 @@ def page_admin():
                                                 'analysis': json.dumps(item['analysis'])
                                             })
                                         
-                                        success = user_db.save_analysis_results(analysis_results)
-                                        print(f"Saved analysis results to database: {'Success' if success else 'Failed'}")
+                                        #success = user_db.save_analysis_results(analysis_results)
+                                        #print(f"Saved analysis results to database: {'Success' if success else 'Failed'}")
                                         
                                         # Update UI with progress
                                         analysis_container.clear()
@@ -751,11 +781,17 @@ def page_admin():
                                             ui.label('Analysis complete. Generating visualizations...').classes('text-h6 mb-2')
                                             loading_spinner = ui.spinner('dots', size='lg').classes('text-primary')
                                         
+                                        # Force tab after updating UI
+                                        tabs.set_value("Macro Analysis")
+                                        
                                         # Generate visualizations
                                         print("\n=== GENERATING VISUALIZATIONS ===")
                                         
                                         # Clear loading state and display results
                                         analysis_container.clear()
+                                        
+                                        # Force tab after clearing container
+                                        tabs.set_value("Macro Analysis")
                                         
                                         # Display analysis summary
                                         with analysis_container:
@@ -771,6 +807,9 @@ def page_admin():
                                                     ui.label(f'Date Range: {start_dt} to {end_dt}').classes('text-subtitle1')
                                                     ui.label(f'Analysis Model: {model}').classes('text-subtitle1')
                                             
+                                            # Force tab again after adding the summary stats
+                                            tabs.set_value("Macro Analysis")
+                                            
                                             # Display visualizations with error handling for each
                                             try:
                                                 # Display topic heatmap
@@ -779,33 +818,77 @@ def page_admin():
                                                     ui.label('Topic Sentiment Analysis').classes('text-h6 mb-2')
                                                     topic_heatmap = summary_analyzer.generate_topic_heatmap(analyzed_data)
                                                     print(f"Topic heatmap generated: {type(topic_heatmap)}")
-                                                    ui.plotly(topic_heatmap).classes('w-full h-[400px]')
+                                                    # Process the figure to ensure it's responsive and properly sized
+                                                    # First, update the layout
+                                                    topic_heatmap.update_layout(
+                                                        autosize=True,
+                                                        margin=dict(l=50, r=50, t=80, b=50),
+                                                        height=400
+                                                    )
+                                                    
+                                                    # Add plotly with custom container height and responsive styling
+                                                    plot_container = ui.plotly(topic_heatmap).classes('w-full')
+                                                    # Apply Plotly.js configuration options as props
+                                                    plot_container.props('responsive=true')
+                                                    plot_container.style('height: 400px; max-width: 100%; overflow: visible;')
+                                                    
+                                                # Force tab after rendering heatmap
+                                                tabs.set_value("Macro Analysis")
                                             except Exception as e:
                                                 print(f"Error generating topic heatmap: {e}")
                                                 with ui.card().classes('w-full mb-4 p-4'):
                                                     ui.label('Topic Sentiment Analysis').classes('text-h6 mb-2')
                                                     ui.label(f'Error generating visualization: {str(e)}').classes('text-negative')
+                                                # Force tab even on error
+                                                tabs.set_value("Macro Analysis")
                                             
                                             try:
                                                 # Display satisfaction chart
                                                 print("Generating satisfaction chart...")
-                                                with ui.row().classes('w-full gap-4'):
-                                                    with ui.card().classes('w-1/2 p-4'):
+                                                with ui.row().classes('w-full flex flex-col md:flex-row gap-4 my-4'):
+                                                    with ui.card().classes('w-full md:w-1/2 p-4'):
                                                         ui.label('User Satisfaction').classes('text-h6 mb-2')
                                                         satisfaction_chart = summary_analyzer.generate_satisfaction_chart(analyzed_data)
                                                         print(f"Satisfaction chart generated: {type(satisfaction_chart)}")
-                                                        ui.plotly(satisfaction_chart).classes('w-full h-[350px]')
+                                                        # Set responsive layout for satisfaction chart
+                                                        satisfaction_chart.update_layout(
+                                                            autosize=True,
+                                                            margin=dict(l=30, r=30, t=50, b=50),
+                                                            height=350
+                                                        )
+                                                        
+                                                        # Add plotly with consistent configuration
+                                                        plot_container = ui.plotly(satisfaction_chart).classes('w-full')
+                                                        # Apply Plotly.js configuration options as props
+                                                        plot_container.props('responsive=true')
+                                                        plot_container.style('height: 350px; max-width: 100%; overflow: visible;')
                                                     
-                                                    with ui.card().classes('w-1/2 p-4'):
+                                                    with ui.card().classes('w-full md:w-1/2 p-4'):
                                                         ui.label('Conversation Types').classes('text-h6 mb-2')
                                                         types_chart = summary_analyzer.generate_conversation_types_chart(analyzed_data)
                                                         print(f"Conversation types chart generated: {type(types_chart)}")
-                                                        ui.plotly(types_chart).classes('w-full h-[350px]')
+                                                        # Set responsive layout for conversation types chart
+                                                        types_chart.update_layout(
+                                                            autosize=True,
+                                                            margin=dict(l=30, r=30, t=50, b=50),
+                                                            height=350
+                                                        )
+                                                        
+                                                        # Add plotly with consistent configuration
+                                                        plot_container = ui.plotly(types_chart).classes('w-full')
+                                                        # Apply Plotly.js configuration options as props
+                                                        plot_container.props('responsive=true')
+                                                        plot_container.style('height: 350px; max-width: 100%; overflow: visible;')
+                                                        
+                                                # Force tab after rendering charts
+                                                tabs.set_value("Macro Analysis")
                                             except Exception as e:
                                                 print(f"Error generating charts: {e}")
                                                 with ui.card().classes('w-full mb-4 p-4'):
                                                     ui.label('Charts').classes('text-h6 mb-2')
                                                     ui.label(f'Error generating charts: {str(e)}').classes('text-negative')
+                                                # Force tab even on error
+                                                tabs.set_value("Macro Analysis")
                                             
                                             try:
                                                 # Display top questions table
@@ -814,18 +897,39 @@ def page_admin():
                                                     ui.label('Top User Questions').classes('text-h6 mb-2')
                                                     questions_table = summary_analyzer.generate_top_questions_table(analyzed_data, top_n=15)
                                                     print(f"Questions table generated: {type(questions_table)}")
-                                                    ui.plotly(questions_table).classes('w-full')
+                                                    # Set responsive layout for questions table
+                                                    # Calculate better height based on number of rows (15 rows x 30px per row + 100px for header/margins)
+                                                    questions_table.update_layout(
+                                                        autosize=True,
+                                                        margin=dict(l=10, r=10, t=50, b=10),
+                                                        height=550  # Allow more space for the table
+                                                    )
+                                                    
+                                                    # Add plotly with consistent configuration
+                                                    plot_container = ui.plotly(questions_table).classes('w-full')
+                                                    # Apply Plotly.js configuration options as props
+                                                    plot_container.props('responsive=true')
+                                                    plot_container.style('height: auto; min-height: 550px; max-width: 100%; overflow: visible;')
+                                                    
+                                                # Force tab after rendering table
+                                                tabs.set_value("Macro Analysis")
                                             except Exception as e:
                                                 print(f"Error generating questions table: {e}")
                                                 with ui.card().classes('w-full mb-4 p-4'):
                                                     ui.label('Top User Questions').classes('text-h6 mb-2')
                                                     ui.label(f'Error generating questions table: {str(e)}').classes('text-negative')
+                                                # Force tab even on error
+                                                tabs.set_value("Macro Analysis")
                                             
-                                            # Force the tab to stay on Macro Analysis
+                                            # Final tab force at the end
                                             tabs.set_value("Macro Analysis")
                                             
                                             print("All visualizations complete")
                                             ui.notify("Analysis complete!", type="positive", timeout=5000)
+                                            
+                                            # Add buttons to restart or print results
+                                            with ui.row().classes('justify-end mt-4'):
+                                                ui.button('Run New Analysis', icon='refresh', on_click=generate_macro_analysis).props('color=primary')
                                         
                                     except Exception as e:
                                         import traceback
@@ -850,6 +954,11 @@ def page_admin():
                                                 type="negative",
                                                 position="top-right",
                                                 timeout=5000)
+                                    
+                                    # Final force of tab
+                                    nonlocal current_tab
+                                    current_tab = "Macro Analysis"
+                                    tabs.set_value("Macro Analysis")
                                 
                                 # Generate analysis button
                                 analyze_btn = ui.button('Generate Analysis', icon='analytics', on_click=generate_macro_analysis)
@@ -886,7 +995,7 @@ def page_admin():
                         The analysis is saved to the database, so you can quickly retrieve it in the future.
                         """)
         
-        # Add CSS classes to make rows appear clickable
+        # Add CSS classes to make rows appear clickable and JS to ensure tabs persist
         ui.add_head_html('''
         <style>
             .q-table tbody tr {
@@ -896,7 +1005,69 @@ def page_admin():
             .q-table tbody tr:hover {
                 background-color: rgba(59, 130, 246, 0.1);
             }
+            /* Make active tab more visible */
+            .q-tab--active {
+                font-weight: bold;
+                border-bottom: 2px solid currentColor;
+            }
+            /* Fix for Plotly charts to ensure they don't overflow */
+            .js-plotly-plot, .plotly, .plot-container {
+                max-width: 100% !important;
+                height: auto !important;
+                overflow: visible !important;
+            }
+            .js-plotly-plot .plot-container .main-svg {
+                max-width: 100% !important;
+                height: auto !important;
+            }
+            /* Ensure cards have proper spacing and sizing */
+            .q-card {
+                overflow: visible !important;
+                margin-bottom: 1rem;
+            }
+            /* Allow grid layout for better visualization spacing */
+            .grid-container {
+                display: grid;
+                grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+                gap: 1rem;
+            }
+            /* Responsive cards and layouts */
+            @media (max-width: 768px) {
+                .md\:w-1\/2 {
+                    width: 100% !important;
+                    margin-bottom: 1rem;
+                }
+                .md\:flex-row {
+                    flex-direction: column !important;
+                }
+            }
         </style>
+        <script>
+            // Helper function to ensure tab visibility
+            document.addEventListener('DOMContentLoaded', () => {
+                // Use MutationObserver to watch for changes to the DOM
+                const observer = new MutationObserver((mutations) => {
+                    // Find the active tab panel
+                    const activeTab = document.querySelector('.q-tab--active');
+                    if (activeTab && activeTab.textContent.includes('Macro Analysis')) {
+                        // Get corresponding tab panel
+                        const tabPanels = document.querySelectorAll('.q-tab-panel');
+                        tabPanels.forEach(panel => {
+                            if (panel.innerHTML.includes('Macro Analysis')) {
+                                // Force it to be visible
+                                panel.style.display = 'block';
+                            }
+                        });
+                    }
+                });
+                
+                // Start observing the document with the configured parameters
+                observer.observe(document.body, { 
+                    childList: true, 
+                    subtree: true 
+                });
+            });
+        </script>
         ''')
 
 # --- No ui.run() here, as it's part of an existing app ---

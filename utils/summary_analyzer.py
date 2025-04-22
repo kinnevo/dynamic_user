@@ -229,11 +229,17 @@ class SummaryAnalyzer:
                 color_continuous_scale='Viridis'
             )
             
+            # Make the figure responsive
+            fig.update_traces(hovertemplate='<b>Topic:</b> %{y}<br><b>Sentiment:</b> %{x}<br><b>Count:</b> %{z}<extra></extra>')
+            
+            # Update layout for proper sizing and responsiveness
             fig.update_layout(
                 title="Topic Sentiment Heatmap",
                 xaxis_title="Sentiment",
                 yaxis_title="Topic",
-                height=600
+                height=600,
+                autosize=True,
+                margin=dict(l=50, r=50, t=80, b=50)
             )
             
             print("Heatmap figure created successfully")
@@ -306,7 +312,9 @@ class SummaryAnalyzer:
                 tickvals=scores,
                 ticktext=['Very Low (1)', 'Low (2)', 'Neutral (3)', 'High (4)', 'Very High (5)']
             ),
-            height=400
+            height=400,
+            autosize=True,
+            margin=dict(l=30, r=30, t=50, b=50)
         )
         
         return fig
@@ -355,7 +363,9 @@ class SummaryAnalyzer:
         
         fig.update_layout(
             title="Conversation Types Distribution",
-            height=400
+            height=400,
+            autosize=True,
+            margin=dict(l=20, r=20, t=50, b=20)
         )
         
         return fig
@@ -418,7 +428,9 @@ class SummaryAnalyzer:
         
         fig.update_layout(
             title="Top User Questions",
-            height=400 + (len(top_questions) * 25)  # Adjust height based on number of entries
+            height=400 + (len(top_questions) * 25),  # Adjust height based on number of entries
+            autosize=True,
+            margin=dict(l=10, r=10, t=50, b=10)
         )
         
         return fig
