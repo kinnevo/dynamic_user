@@ -264,18 +264,52 @@ def page_admin():
                 with ui.column().classes('w-full p-4'):
                     #ui.label('Conversation Summaries').classes('text-h5 q-mb-md')
                     
-                    # Date range and user selection controls - Single row layout
+                    # Date range and user selection controls
                     ui.label('Selection Criteria').classes('text-subtitle1 q-mb-sm')
                     
-                    # Create a single row to hold everything
-                    with ui.row().classes('w-full gap-4 items-end'):
-                        # Use a custom wrapper for better control
-                        with ui.element('div').classes('flex gap-2 items-end flex-grow-1 w-2/3'):
-                            # Create date range selectors in the same container
-                            start_date_input, start_hour, end_date_input, end_hour = create_date_range_selector()
+                    # Create a custom implementation that uses the same building blocks
+                    with ui.row().classes('w-full items-end'):
+                        # Get today's date for default values
+                        from datetime import datetime
+                        today = datetime.today().strftime('%Y-%m-%d')
                         
-                        # Create user selector in the same row with proper width
-                        user_select, refresh_users = create_user_selector(width='w-1/3')
+                        # First date components - following same pattern as in layouts.py
+                        start_date_input = ui.input('Start Date', value=today).classes('w-24 md:w-32')
+                        start_date_input.props('dense outlined readonly')
+                        
+                        with ui.menu().props('no-parent-event') as start_menu:
+                            with ui.date(value=today).bind_value(start_date_input):
+                                with ui.row().classes('justify-end q-pa-sm'):
+                                    ui.button('Done', on_click=start_menu.close).props('flat color=primary')
+                        
+                        with start_date_input.add_slot('append'):
+                            ui.icon('event').on('click', start_menu.open).classes('cursor-pointer')
+                            
+                        # Start hour
+                        start_hour = ui.number(value=0, min=0, max=23, step=1, format='%d').classes('w-16')
+                        start_hour.props('dense outlined label="Hour"')
+                        
+                        # Separator
+                        ui.label('to').classes('mx-2')
+                        
+                        # End date components
+                        end_date_input = ui.input('End Date', value=today).classes('w-24 md:w-32')
+                        end_date_input.props('dense outlined readonly')
+                        
+                        with ui.menu().props('no-parent-event') as end_menu:
+                            with ui.date(value=today).bind_value(end_date_input):
+                                with ui.row().classes('justify-end q-pa-sm'):
+                                    ui.button('Done', on_click=end_menu.close).props('flat color=primary')
+                        
+                        with end_date_input.add_slot('append'):
+                            ui.icon('event').on('click', end_menu.open).classes('cursor-pointer')
+                            
+                        # End hour
+                        end_hour = ui.number(value=23, min=0, max=23, step=1, format='%d').classes('w-16')
+                        end_hour.props('dense outlined label="Hour"')
+                        
+                        # User selection - use the function from layouts.py
+                        user_select, refresh_users = create_user_selector(width='w-64 md:w-80 ml-auto')
                     
                     # Control buttons row
                     with ui.row().classes('w-full justify-between mt-4'):
