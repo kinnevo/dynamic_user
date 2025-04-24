@@ -781,8 +781,6 @@ if __name__ == "__main__":
     # Setup asyncio policies for better performance
     try:
         import uvloop
-import os
-import sys
         uvloop.install()
         print("Using uvloop for improved async performance")
     except ImportError:
