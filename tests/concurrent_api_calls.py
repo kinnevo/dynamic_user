@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import List, Dict, Any, Optional, Tuple
 
 # Add parent directory to path to import the LangflowClient
-sys.path.append('/home/rico/Desktop/Dev/fast-inno/dynamic_user')
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from utils.langflow_client import LangflowClient
 
 # Configure test parameters
@@ -781,6 +781,8 @@ if __name__ == "__main__":
     # Setup asyncio policies for better performance
     try:
         import uvloop
+import os
+import sys
         uvloop.install()
         print("Using uvloop for improved async performance")
     except ImportError:
