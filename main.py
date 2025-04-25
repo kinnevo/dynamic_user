@@ -40,4 +40,4 @@ def index():
 
 # Use a fixed secret key for development
 secret_key = 'development_secret_key_1234567890'
-ui.run(title='User Creation', port=8080, favicon='static/favicon.png', storage_secret=secret_key) 
+ui.run(title='FastInnovation 1.2', port=8080, favicon='static/favicon.png', storage_secret=secret_key) 
