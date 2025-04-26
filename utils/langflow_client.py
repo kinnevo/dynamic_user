@@ -1,7 +1,9 @@
-import requests
 import os
 import json
 import time
+import aiohttp  # Replace requests with aiohttp for async support
+import asyncio
+import requests  # Keep for sync operations like check_connection
 from typing import Dict, Any, Optional, List, Tuple
 from dotenv import load_dotenv
 
@@ -28,7 +30,7 @@ class LangflowClient:
             
         self.base_url = os.getenv("LANGFLOW_API_URL")
         # Remove trailing slash if present
-        if self.base_url.endswith('/'):
+        if self.base_url and self.base_url.endswith('/'):
             self.base_url = self.base_url[:-1]
             
         self.flow_id = os.getenv("LANGFLOW_FLOW_ID")
@@ -91,7 +93,7 @@ class LangflowClient:
                              session_id: str, 
                              history: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         """
-        Send a message to Langflow API for processing
+        Send a message to Langflow API for processing using async HTTP requests
         
         Args:
             message: The user's message
@@ -134,43 +136,47 @@ class LangflowClient:
         # Retry loop
         while retries < self.max_retries:
             try:
-                # Add timeout parameters to prevent hanging requests
-                # Increase timeout values for potential network latency
-                response = requests.post(
-                    api_url, 
-                    json=payload,
-                    headers=self.headers,
-                    timeout=(10, 120)  # 10 seconds for connection, 120 seconds for read
-                )
+                # Use aiohttp for true async HTTP requests
+                async with aiohttp.ClientSession() as session:
+                    # Add timeout parameters to prevent hanging requests
+                    timeout = aiohttp.ClientTimeout(connect=10, total=120)  # 10 seconds for connection, 120 seconds total
+                    
+                    async with session.post(
+                        api_url, 
+                        json=payload,
+                        headers=self.headers,
+                        timeout=timeout
+                    ) as response:
+                        # Check for HTTP errors
+                        if response.status >= 400:
+                            raise aiohttp.ClientResponseError(
+                                response.request_info,
+                                response.history,
+                                status=response.status,
+                                message=f"HTTP Error {response.status}",
+                                headers=response.headers
+                            )
+                            
+                        # Parse JSON response
+                        result = await response.json()
+                        return result
                 
-                # Check for HTTP errors
-                response.raise_for_status()
-                return response.json()
-                
-            except requests.exceptions.ConnectTimeout as e:
-                last_error = f"Connection timeout ({retries+1}/{self.max_retries}): Could not establish connection to {self.base_url}. The server might be down or unreachable."
+            except asyncio.TimeoutError:
+                last_error = f"Timeout ({retries+1}/{self.max_retries}): The operation timed out."
                 print(last_error)
             
-            except requests.exceptions.ReadTimeout as e:
-                last_error = f"Read timeout ({retries+1}/{self.max_retries}): The server took too long to respond. It might be processing a complex request or under heavy load."
-                print(last_error)
-                
-            except requests.exceptions.ConnectionError as e:
+            except aiohttp.ClientConnectorError as e:
                 last_error = f"Connection error ({retries+1}/{self.max_retries}): Could not connect to Langflow API. Please check if the API server is running and accessible."
                 print(last_error)
                 
-            except requests.exceptions.HTTPError as e:
-                status_code = e.response.status_code if hasattr(e, 'response') else "unknown"
+            except aiohttp.ClientResponseError as e:
+                status_code = e.status
                 last_error = f"HTTP error {status_code} ({retries+1}/{self.max_retries}): The server returned an error status."
                 print(last_error)
                 
                 # No retry for 4xx errors (client errors)
                 if status_code and 400 <= status_code < 500:
                     return {"error": f"Client error: {str(e)}"}
-                
-            except requests.exceptions.RequestException as e:
-                last_error = f"Request error ({retries+1}/{self.max_retries}): {str(e)}"
-                print(last_error)
                 
             except json.JSONDecodeError:
                 last_error = f"Invalid JSON response ({retries+1}/{self.max_retries}): The server returned a response that couldn't be parsed as JSON."
@@ -186,7 +192,7 @@ class LangflowClient:
                 # Exponential backoff
                 wait_time = self.retry_delay * (2 ** (retries - 1))
                 print(f"Retrying in {wait_time} seconds...")
-                time.sleep(wait_time)
+                await asyncio.sleep(wait_time)  # Use asyncio.sleep instead of time.sleep
         
         # If we've exhausted retries, return the error
         return {
