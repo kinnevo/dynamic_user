@@ -3,44 +3,47 @@ import uuid
 from utils.message_router import MessageRouter
 from utils.layouts import create_navigation_menu_2
 from utils.database import PostgresAdapter
-from utils.langflow_client import LangflowClient
+from utils.filc_agent_client import FilcAgentClient  # Changed from LangflowClient
 
 # Initialize components
 message_router = MessageRouter()
 db_adapter = PostgresAdapter()
-# Use the existing singleton instance
-langflow_client = LangflowClient()
+# Use the FilcAgentClient instead of LangflowClient
+filc_client = FilcAgentClient()
 
 @ui.page('/chat')
 async def chat_page():
-    """Chat interface for Langflow interaction"""
+    """Chat interface for FILC Agent interaction"""
     create_navigation_menu_2()
     
     with ui.header().classes('items-center justify-between'):
         # Left side with title
         with ui.row().classes('items-center gap-2'):
-            ui.label('Chat with Langflow').classes('text-h3')
+            ui.label('Chat with FILC Agent').classes('text-h3')
         
         # Right side with status indicator and check button
         with ui.row().classes('items-center gap-2'):
             # Create the status indicator as refreshable component
             @ui.refreshable
             def update_status_indicator():
+                # Use the connection status from filc_client
+                connection_status = filc_client.connection_status if hasattr(filc_client, 'connection_status') else 'unknown'
+                
                 status_color = {
                     'connected': 'green',
                     'timeout': 'red',
                     'unreachable': 'red',
                     'error': 'red',
                     'unknown': 'yellow'
-                }.get(langflow_client.connection_status, 'yellow')
+                }.get(connection_status, 'yellow')
                 
                 status_text = {
-                    'connected': 'Connected to Langflow',
+                    'connected': 'Connected to FILC Agent',
                     'timeout': 'Connection Timeout - Server not responding',
                     'unreachable': 'Server Unreachable - Check network or server status',
                     'error': 'Connection Error - See logs for details',
                     'unknown': 'Status Unknown - Click "Check Connection"'
-                }.get(langflow_client.connection_status, 'Unknown Status')
+                }.get(connection_status, 'Unknown Status')
                 
                 with ui.tooltip(status_text):
                     ui.icon('circle', color=status_color).classes('text-sm')
@@ -50,14 +53,17 @@ async def chat_page():
             
             # Function to check connection and update indicator
             async def check_and_update_connection():
-                ui.notify('Checking Langflow connection...', timeout=2000)
-                is_connected, message = langflow_client.check_connection()
+                ui.notify('Checking FILC Agent connection...', timeout=2000)
+                is_connected, message = await filc_client.check_connection()
+                # Store the connection status for the indicator
+                filc_client.connection_status = 'connected' if is_connected else 'error'
+                
                 refresh_task = status_indicator.refresh()
                 if refresh_task is not None:
                     await refresh_task
                 
                 if is_connected:
-                    ui.notify('Connected to Langflow API', type='positive')
+                    ui.notify('Connected to FILC Agent API', type='positive')
                 else:
                     ui.notify(f'Connection issue: {message}', type='negative', timeout=8000)
             
