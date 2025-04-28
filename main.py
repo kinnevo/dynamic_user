@@ -2,7 +2,7 @@ from nicegui import ui, app
 import os
 from dotenv import load_dotenv
 from utils.database import PostgresAdapter
-from utils.langflow_client import LangflowClient
+from utils.filc_agent_client import FilcAgentClient
 from utils.message_router import MessageRouter
 from pages.reportes import reportes_page
 from pages.admin import page_admin
@@ -16,7 +16,7 @@ if os.path.exists('.env'):
 # Initialize database adapter and service components
 # The database adapter is also initialized in home.py for user session tracking
 db_adapter = PostgresAdapter()
-langflow_client = LangflowClient()  # This is a singleton, so multiple instances share the same connection
+filc_client = FilcAgentClient()
 message_router = MessageRouter()
 
 @app.on_startup
