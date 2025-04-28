@@ -170,7 +170,7 @@ class PostgresAdapter(DatabaseInterface):
                 rows = cursor.fetchall()
                 history = [dict(row) for row in rows]
                 
-                # Format history for Langflow
+                # Format history for FILC Agent API
                 formatted_history = []
                 for msg in history:
                     formatted_history.append({

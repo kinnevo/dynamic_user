@@ -1,16 +1,16 @@
 from typing import Dict, Any, List, Optional
 import json
-from utils.langflow_client import LangflowClient
+from utils.filc_agent_client import FilcAgentClient  # Changed from LangflowClient
 from utils.database import PostgresAdapter
 
 class MessageRouter:
     """
-    Routes messages between the UI and Langflow backend
+    Routes messages between the UI and FILC Agent backend
     Handles message processing, storage, and response extraction
     """
     def __init__(self):
-        # Use the existing singleton instance
-        self.langflow_client = LangflowClient()
+        # Use FilcAgentClient instead of LangflowClient
+        self.filc_client = FilcAgentClient()
         self.db_adapter = PostgresAdapter()
     
     async def process_user_message(self, 
@@ -18,7 +18,7 @@ class MessageRouter:
                                  session_id: str, 
                                  user_id: int) -> Dict[str, Any]:
         """
-        Process a user message through Langflow and store in database
+        Process a user message through FILC Agent API and store in database
         
         Args:
             message: User message text
@@ -49,8 +49,8 @@ class MessageRouter:
             # Update user status
             self.db_adapter.update_user_status(session_id, "Active")
             
-            # Send to Langflow
-            response = await self.langflow_client.process_message(
+            # Send to FILC Agent API
+            response = await self.filc_client.process_message(
                 message=message,
                 session_id=session_id,
                 history=history
@@ -90,41 +90,21 @@ class MessageRouter:
     
     def _extract_response_text(self, response: Dict[str, Any]) -> Optional[str]:
         """
-        Extract text from Langflow response
+        Extract text from FILC Agent API response
         
         Args:
-            response: Raw response from Langflow API
+            response: Raw response from FILC Agent API
             
         Returns:
             Extracted text content or error message
         """
-        # Handle error responses with detailed information
+        # Handle error responses
         if "error" in response:
-            error_message = response["error"]
-            
-            # If we have status and suggestions, format a more helpful error message
-            if "status" in response and "suggestions" in response:
-                suggestions = "\n• " + "\n• ".join(response["suggestions"])
-                return f"Error: {error_message}\n\nTroubleshooting suggestions:{suggestions}"
-            
-            return f"Error: {error_message}"
+            return f"Error: {response['error']}"
         
-        # Based on Workshop_full format
-        if "outputs" in response and len(response["outputs"]) > 0:
-            try:
-                return response["outputs"][0]["outputs"][0]["results"]["message"]["text"]
-            except (KeyError, IndexError) as e:
-                print(f"Failed to parse output format 1: {str(e)}")
+        # Handle success responses from FILC Agent API
+        if "content" in response and response.get("success", False):
+            return response["content"]
         
-        # Alternative format
-        if "result" in response:
-            result = response["result"]
-            if isinstance(result, dict) and "message" in result:
-                return result["message"]["text"]
-            return str(result)
-        
-        # Debug output format
-        print(f"Response format not recognized. Keys: {', '.join(response.keys())}")
-            
         # Fallback
-        return str(response.get("output", "No response"))
+        return str(response.get("content", "No response"))
