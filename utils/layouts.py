@@ -46,39 +46,57 @@ def clearSessionAndRedirect():
     ui.notify('Sesión eliminada correctamente')
 
 def create_navigation_menu_2():
-    with ui.header().classes('items-center justify-between bg-blue-500'):
+    with ui.header().classes('items-center justify-between'):
         # Left side - Logo
-        with ui.button(on_click=lambda: ui.navigate.to('/home')).classes('p-0'):
+        with ui.button(on_click=lambda: ui.navigate.to('/home')).classes('no-underline'):
             ui.image('static/favicon.png').classes('h-8 w-8')
             
-        # Middle - Navigation buttons - only on medium and larger screens
-        with ui.row().classes('hidden md:flex flex-grow justify-center gap-4'):
+        # Middle - Navigation buttons for desktop
+        with ui.row().classes('max-sm:hidden flex-grow justify-center gap-2'):
             ui.button('Home', icon='home', on_click=lambda: ui.navigate.to('/home')).props('flat color=white')
             ui.button('Chat', icon='chat', on_click=lambda: ui.navigate.to('/chat2')).props('flat color=white')
             ui.button('Reports', icon='analytics', on_click=lambda: ui.navigate.to('/reportes')).props('flat color=white')
-            #ui.button('Admin', icon='supervisor_account', on_click=lambda: ui.navigate.to('/admin')).props('flat color=white')
             
-        # Small screen navigation - only on small screens
-        with ui.row().classes('md:hidden flex justify-center gap-4'):
-            ui.button(icon='home', on_click=lambda: ui.navigate.to('/home')).props('flat color=white round')
-            ui.button(icon='chat', on_click=lambda: ui.navigate.to('/chat2')).props('flat color=white round')
-            ui.button(icon='analytics', on_click=lambda: ui.navigate.to('/reportes')).props('flat color=white round')
-            #ui.button(icon='supervisor_account', on_click=lambda: ui.navigate.to('/admin')).props('flat color=white')
-        
-        # Right side - User menu with alignment fix
-        with ui.element('div').classes('ml-auto'):
-            # Create menu first
-            with ui.menu().classes('mt-2') as menu:
-                with ui.menu_item('Profile'):
-                    ui.icon('person')
-                with ui.menu_item('Settings'):
-                    ui.icon('settings')
-                ui.separator()
-                with ui.menu_item('Logout', on_click=clearSessionAndRedirect).classes('text-red-500'):
-                    ui.icon('logout')
+        # Right side - Mobile menu trigger and user menu
+        with ui.row().classes('ml-auto items-center gap-2'):
+            # Status indicator for both desktop and mobile (optional)
+            # ui.icon('circle', color='green').classes('text-sm')
             
-            # Then create button that opens the menu
-            ui.button(icon='menu', on_click=menu.open).props('flat color=white round')
+            # Desktop user menu
+            with ui.element('div').classes('max-sm:hidden'):
+                # Create menu first
+                with ui.menu().classes('mt-2') as user_menu:
+                    with ui.menu_item('Profile'):
+                        ui.icon('person')
+                    with ui.menu_item('Settings'):
+                        ui.icon('settings')
+                    ui.separator()
+                    with ui.menu_item('Logout', on_click=clearSessionAndRedirect).classes('text-red-500'):
+                        ui.icon('logout')
+                
+                # Then create button that opens the menu
+                ui.button(icon='account_circle', on_click=user_menu.open).props('flat color=white')
+            
+            # Mobile navigation menu
+            with ui.element('div').classes('sm:hidden'):
+                # Create mobile menu
+                with ui.menu().classes('mt-2') as mobile_menu:
+                    with ui.menu_item('Home', on_click=lambda: ui.navigate.to('/home')):
+                        ui.icon('home')
+                    with ui.menu_item('Chat', on_click=lambda: ui.navigate.to('/chat2')):
+                        ui.icon('chat')
+                    with ui.menu_item('Reports', on_click=lambda: ui.navigate.to('/reportes')):
+                        ui.icon('analytics')
+                    ui.separator()
+                    with ui.menu_item('Profile'):
+                        ui.icon('person')
+                    with ui.menu_item('Settings'):
+                        ui.icon('settings')
+                    with ui.menu_item('Logout', on_click=clearSessionAndRedirect).classes('text-red-500'):
+                        ui.icon('logout')
+                
+                # Button to open mobile menu
+                ui.button(icon='menu', on_click=mobile_menu.open).props('flat color=white')
 
 def create_date_range_selector(container=None, default_start_hour=0, default_end_hour=23):
     """Create a date range selector component
