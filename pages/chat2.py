@@ -84,20 +84,20 @@ async def chat_page():
     async def load_conversation_history():
         """Load conversation history from the database"""
         session_id = app.storage.browser.get('session_id', None)
-        if not session_id:
-            return
-        
-        # Get recent messages from database
-        messages = db_adapter.get_recent_messages(session_id, limit=50)
         
         # Clear the existing messages in the UI
         messages_container.clear()
         
-        # Show welcome message if no history
+        # Get recent messages if we have a session
+        messages = []
+        if session_id:
+            messages = db_adapter.get_recent_messages(session_id, limit=50)
+        
+        # Show welcome message if no history or no session
         if not messages:
             with messages_container:
                 with ui.element('div').classes('self-start bg-gray-200 p-3 rounded-lg max-w-[80%]'):
-                    ui.markdown("Bienvenido a Fast Innovation!\nDescribe tu idea y te ayudaremos a llevarla a cabo.")
+                    ui.markdown("Bienvenido a Fast Innovation!\nDescribe tu idea y desarrollemosla juntos.")
             return
         
         # Update the chat_messages list
@@ -129,12 +129,7 @@ async def chat_page():
         except Exception as e:
             print(f"Error scrolling chat after loading history: {e}")
     
-    # Initialize with welcome message or history
-    with messages_container:
-        with ui.element('div').classes('self-start bg-gray-200 p-3 rounded-lg max-w-[80%]'):
-            ui.markdown("Bienvenido a Fast Innovation!\nDescribe tu idea y te ayudaremos a llevarla a cabo.")
-    
-    # Load history after initialization
+    # Load history immediately
     load_task = load_conversation_history()
     if load_task is not None:
         await load_task
