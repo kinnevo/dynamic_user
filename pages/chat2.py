@@ -79,7 +79,7 @@ async def chat_page():
     # Initialize with welcome message
     with messages_container:
         with ui.element('div').classes('self-start bg-gray-200 p-3 rounded-lg max-w-[80%]'):
-            ui.markdown("Welcome to FILC Agent Chat!\nType a message below to begin.")
+            ui.markdown("Bienvenido a Fast Innovation!\nDescribe tu idea y te ayudaremos a llevarla a cabo.")
     
     # Store chat messages in this list to manage state
     chat_messages = []
@@ -88,6 +88,9 @@ async def chat_page():
     async def send_message():
         if not message_input.value:
             return
+        
+        # Show loading spinner immediately
+        spinner.visible = True
         
         # Get session info
         session_id = app.storage.browser.get('session_id', None)
@@ -128,9 +131,6 @@ async def chat_page():
             ''', timeout=5.0)
         except Exception as e:
             print(f"Error scrolling chat: {e}")
-        
-        # Show loading spinner
-        spinner.visible = True
         
         try:
             # Process message
