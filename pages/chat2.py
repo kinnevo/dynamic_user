@@ -76,13 +76,68 @@ async def chat_page():
     # Chat messages container with bubble styling
     messages_container = ui.column().classes('w-full h-[73vh] overflow-y-auto p-4 gap-2 border border-solid border-gray-200 rounded-lg')
     
-    # Initialize with welcome message
+    # Store chat messages in this list to manage state
+    chat_messages = []
+    
+    # Load previous messages
+    @ui.refreshable
+    async def load_conversation_history():
+        """Load conversation history from the database"""
+        session_id = app.storage.browser.get('session_id', None)
+        if not session_id:
+            return
+        
+        # Get recent messages from database
+        messages = db_adapter.get_recent_messages(session_id, limit=50)
+        
+        # Clear the existing messages in the UI
+        messages_container.clear()
+        
+        # Show welcome message if no history
+        if not messages:
+            with messages_container:
+                with ui.element('div').classes('self-start bg-gray-200 p-3 rounded-lg max-w-[80%]'):
+                    ui.markdown("Bienvenido a Fast Innovation!\nDescribe tu idea y te ayudaremos a llevarla a cabo.")
+            return
+        
+        # Update the chat_messages list
+        chat_messages.clear()
+        
+        # Display messages in the UI
+        for message in messages:
+            chat_messages.append(message)
+            
+            if message['role'] == 'user':
+                with messages_container:
+                    with ui.element('div').classes('self-end bg-blue-500 text-white p-3 rounded-lg max-w-[80%]'):
+                        ui.markdown(message['content'])
+            else:
+                with messages_container:
+                    with ui.element('div').classes('self-start bg-gray-200 p-3 rounded-lg max-w-[80%]'):
+                        ui.markdown(message['content'])
+        
+        # Scroll to bottom after loading history
+        try:
+            await ui.run_javascript('''
+                setTimeout(() => {
+                    const container = document.querySelector('.h-\\\\[73vh\\\\]');
+                    if (container) {
+                        container.scrollTop = container.scrollHeight;
+                    }
+                }, 100);
+            ''', timeout=5.0)
+        except Exception as e:
+            print(f"Error scrolling chat after loading history: {e}")
+    
+    # Initialize with welcome message or history
     with messages_container:
         with ui.element('div').classes('self-start bg-gray-200 p-3 rounded-lg max-w-[80%]'):
             ui.markdown("Bienvenido a Fast Innovation!\nDescribe tu idea y te ayudaremos a llevarla a cabo.")
     
-    # Store chat messages in this list to manage state
-    chat_messages = []
+    # Load history after initialization
+    load_task = load_conversation_history()
+    if load_task is not None:
+        await load_task
     
     # Define the send_message function
     async def send_message():
