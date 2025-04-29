@@ -73,17 +73,17 @@ async def chat_page():
     spinner = ui.spinner('dots', size='lg').classes('text-primary absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50')
     spinner.visible = False
     
-    # Text display area using a direct html textarea for maximum compatibility
-    messages_textarea = ui.html("""
-        <textarea id="chat-messages" readonly 
-            style="width: 100%; height: 73vh; min-height: 300px; 
-                  resize: none; padding: 10px; border: 1px solid #e0e0e0; 
-                  border-radius: 4px; font-family: inherit; overflow-y: auto;">
-            Welcome to FILC Agent Chat!
-            Type a message below to begin.
-        </textarea>
-    """).classes('w-full')
-
+    # Chat messages container with bubble styling
+    messages_container = ui.column().classes('w-full h-[73vh] overflow-y-auto p-4 gap-2 border border-solid border-gray-200 rounded-lg')
+    
+    # Initialize with welcome message
+    with messages_container:
+        with ui.element('div').classes('self-start bg-gray-200 p-3 rounded-lg max-w-[80%]'):
+            ui.markdown("Welcome to FILC Agent Chat!\nType a message below to begin.")
+    
+    # Store chat messages in this list to manage state
+    chat_messages = []
+    
     # Define the send_message function
     async def send_message():
         if not message_input.value:
@@ -108,17 +108,26 @@ async def chat_page():
         message = message_input.value
         message_input.value = ''
         
-        # Update the textarea with JavaScript for more reliable behavior
+        # Add user message to chat interface
+        with messages_container:
+            with ui.element('div').classes('self-end bg-blue-500 text-white p-3 rounded-lg max-w-[80%]'):
+                ui.markdown(message)
+        
+        # Store message for later reference
+        chat_messages.append({"role": "user", "content": message})
+        
+        # Scroll to bottom
         try:
             await ui.run_javascript('''
-                const textarea = document.getElementById('chat-messages');
-                if (textarea) {
-                    textarea.value += '\\nYou: ' + ''' + repr(message) + ''';
-                    textarea.scrollTop = textarea.scrollHeight;
-                }
+                setTimeout(() => {
+                    const container = document.querySelector('.h-\\\\[73vh\\\\]');
+                    if (container) {
+                        container.scrollTop = container.scrollHeight;
+                    }
+                }, 100);
             ''', timeout=5.0)
         except Exception as e:
-            print(f"Error updating chat: {e}")
+            print(f"Error scrolling chat: {e}")
         
         # Show loading spinner
         spinner.visible = True
@@ -131,32 +140,49 @@ async def chat_page():
                 user_id=user_id
             )
             
-            # Add response to display using JavaScript
+            # Add response to chat interface
             if 'content' in response:
+                with messages_container:
+                    with ui.element('div').classes('self-start bg-gray-200 p-3 rounded-lg max-w-[80%]'):
+                        ui.markdown(response['content'])
+                
+                # Store response for later reference
+                chat_messages.append({"role": "assistant", "content": response['content']})
+                
+                # Scroll to bottom
                 try:
                     await ui.run_javascript('''
-                        const textarea = document.getElementById('chat-messages');
-                        if (textarea) {
-                            textarea.value += '\\n\\nFILC Agent: ' + ''' + repr(response['content']) + ''' + '\\n';
-                            textarea.scrollTop = textarea.scrollHeight;
-                        }
+                        setTimeout(() => {
+                            const container = document.querySelector('.h-\\\\[73vh\\\\]');
+                            if (container) {
+                                container.scrollTop = container.scrollHeight;
+                            }
+                        }, 100);
                     ''', timeout=5.0)
                 except Exception as e:
-                    print(f"Error adding response: {e}")
+                    print(f"Error scrolling chat: {e}")
+                
         except Exception as e:
             ui.notify(f'Error processing message: {str(e)}', type='negative')
             
-            # Add error message to display using JavaScript
+            # Add error message to chat interface
+            with messages_container:
+                with ui.element('div').classes('self-start bg-red-100 p-3 rounded-lg max-w-[80%] border-l-4 border-red-500'):
+                    ui.markdown("**⚠️ Error**\n\nCould not get response")
+            
+            # Scroll to bottom
             try:
                 await ui.run_javascript('''
-                    const textarea = document.getElementById('chat-messages');
-                    if (textarea) {
-                        textarea.value += '\\n\\n⚠️ Error: Could not get response\\n';
-                        textarea.scrollTop = textarea.scrollHeight;
-                    }
+                    setTimeout(() => {
+                        const container = document.querySelector('.h-\\\\[73vh\\\\]');
+                        if (container) {
+                            container.scrollTop = container.scrollHeight;
+                        }
+                    }, 100);
                 ''', timeout=5.0)
             except Exception as e:
-                print(f"Error adding error message: {e}")
+                print(f"Error scrolling chat: {e}")
+            
         finally:
             # Hide spinner
             spinner.visible = False
