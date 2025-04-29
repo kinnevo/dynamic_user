@@ -46,23 +46,23 @@ def clearSessionAndRedirect():
     ui.notify('Sesión eliminada correctamente')
 
 def create_navigation_menu_2():
-    with ui.header().classes('items-center justify-between'):
+    with ui.header().classes('items-center justify-between bg-blue-500'):
         # Left side - Logo
-        with ui.button(on_click=lambda: ui.navigate.to('/home')):
+        with ui.button(on_click=lambda: ui.navigate.to('/home')).classes('p-0'):
             ui.image('static/favicon.png').classes('h-8 w-8')
             
-        # Middle - Navigation buttons
-        with ui.row().classes('max-sm:hidden flex-grow justify-center'):
+        # Middle - Navigation buttons - only on medium and larger screens
+        with ui.row().classes('hidden md:flex flex-grow justify-center gap-4'):
             ui.button('Home', icon='home', on_click=lambda: ui.navigate.to('/home')).props('flat color=white')
-            ui.button('Chat', icon='chat', on_click=lambda: ui.navigate.to('/chat')).props('flat color=white')
+            ui.button('Chat', icon='chat', on_click=lambda: ui.navigate.to('/chat2')).props('flat color=white')
             ui.button('Reports', icon='analytics', on_click=lambda: ui.navigate.to('/reportes')).props('flat color=white')
             #ui.button('Admin', icon='supervisor_account', on_click=lambda: ui.navigate.to('/admin')).props('flat color=white')
             
-        # Small screen navigation
-        with ui.row().classes('sm:hidden'):
-            ui.button(icon='home', on_click=lambda: ui.navigate.to('/home')).props('flat color=white')
-            ui.button(icon='chat', on_click=lambda: ui.navigate.to('/chat')).props('flat color=white')
-            ui.button(icon='analytics', on_click=lambda: ui.navigate.to('/reportes')).props('flat color=white')
+        # Small screen navigation - only on small screens
+        with ui.row().classes('md:hidden flex justify-center gap-4'):
+            ui.button(icon='home', on_click=lambda: ui.navigate.to('/home')).props('flat color=white round')
+            ui.button(icon='chat', on_click=lambda: ui.navigate.to('/chat2')).props('flat color=white round')
+            ui.button(icon='analytics', on_click=lambda: ui.navigate.to('/reportes')).props('flat color=white round')
             #ui.button(icon='supervisor_account', on_click=lambda: ui.navigate.to('/admin')).props('flat color=white')
         
         # Right side - User menu with alignment fix
@@ -78,7 +78,7 @@ def create_navigation_menu_2():
                     ui.icon('logout')
             
             # Then create button that opens the menu
-            ui.button(icon='menu', on_click=menu.open).props('flat color=white')
+            ui.button(icon='menu', on_click=menu.open).props('flat color=white round')
 
 def create_date_range_selector(container=None, default_start_hour=0, default_end_hour=23):
     """Create a date range selector component
