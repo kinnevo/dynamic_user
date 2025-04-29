@@ -76,7 +76,7 @@ async def chat_page():
     # Text display area using a direct html textarea for maximum compatibility
     messages_textarea = ui.html("""
         <textarea id="chat-messages" readonly 
-            style="width: 100%; height: 72vh; min-height: 300px; 
+            style="width: 100%; height: 73vh; min-height: 300px; 
                   resize: none; padding: 10px; border: 1px solid #e0e0e0; 
                   border-radius: 4px; font-family: inherit; overflow-y: auto;">
             Welcome to FILC Agent Chat!
