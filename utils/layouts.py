@@ -48,7 +48,7 @@ def clearSessionAndRedirect():
 def create_navigation_menu_2():
     with ui.header().classes('items-center justify-between'):
         # Left side - Logo
-        with ui.button(on_click=lambda: ui.navigate.to('/home')).classes('no-underline'):
+        with ui.button(on_click=lambda: ui.navigate.to('/home')).classes('no-underline p-0'):
             ui.image('static/favicon.png').classes('h-8 w-8')
             
         # Middle - Navigation buttons for desktop
