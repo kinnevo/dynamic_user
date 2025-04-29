@@ -73,6 +73,10 @@ async def chat_page():
     # Chat messages container
     messages_container = ui.column().classes('w-full h-[60vh] overflow-y-auto p-4 gap-2')
     
+    # Add a spacer at the bottom to ensure content is visible
+    with messages_container:
+        ui.space().classes('h-8')  # Add some space at the bottom
+    
     @ui.refreshable
     async def display_messages():
         """Display chat messages from the database"""
@@ -92,6 +96,21 @@ async def chat_page():
             else:
                 with ui.element('div').classes('self-start bg-gray-200 p-3 rounded-lg max-w-[80%]'):
                     ui.markdown(message['content'])
+        
+        # Add spacer at the bottom after messages
+        with messages_container:
+            ui.space().classes('h-8')
+        
+        # Scroll to bottom after adding messages
+        try:
+            await ui.run_javascript('''
+                const container = document.querySelector(".overflow-y-auto");
+                if (container) {
+                    container.scrollTop = container.scrollHeight;
+                }
+            ''', timeout=5.0)
+        except Exception as e:
+            print(f"Error scrolling: {e}")  # Log the error but don't break the function
     
     # Spinner for loading state
     spinner = ui.spinner('dots', size='lg').classes('text-primary')
@@ -127,6 +146,18 @@ async def chat_page():
                 # Show loading spinner
                 spinner.visible = True
                 
+                # First scroll after sending message
+                display_messages.refresh()
+                try:
+                    await ui.run_javascript('''
+                        const container = document.querySelector(".overflow-y-auto");
+                        if (container) {
+                            container.scrollTop = container.scrollHeight;
+                        }
+                    ''', timeout=5.0)
+                except Exception as e:
+                    print(f"Error scrolling: {e}")  # Log the error but don't break the function
+                
                 try:
                     # Process message
                     response = await message_router.process_user_message(
@@ -160,11 +191,17 @@ async def chat_page():
                             with ui.element('div').classes('self-start bg-red-100 p-3 rounded-lg max-w-[80%] border-l-4 border-red-500'):
                                 ui.markdown("**⚠️ Error**\n\nThere was a problem processing your request. The message was saved but the AI response could not be generated.")
                 
-                # Refresh messages display
-                # Make sure display_messages.refresh() returns a value that can be awaited
-                refresh_task = display_messages.refresh()
-                if refresh_task is not None:
-                    await refresh_task
+                # Final scroll after displaying response
+                display_messages.refresh()
+                try:
+                    await ui.run_javascript('''
+                        const container = document.querySelector(".overflow-y-auto");
+                        if (container) {
+                            container.scrollTop = container.scrollHeight;
+                        }
+                    ''', timeout=5.0)
+                except Exception as e:
+                    print(f"Error scrolling: {e}")  # Log the error but don't break the function
             
             # Allow sending message with Enter key
             message_input.on('keydown.enter', send_message)

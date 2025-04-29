@@ -8,6 +8,7 @@ from pages.reportes import reportes_page
 from pages.admin import page_admin
 from pages.chat import chat_page
 from pages.home import home
+from pages.profile import profile_page
 
 # Load environment variables if .env file exists
 if os.path.exists('.env'):

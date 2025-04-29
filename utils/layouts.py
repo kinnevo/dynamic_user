@@ -2,6 +2,7 @@ from nicegui import ui, app
 from utils.state import set_user_logout_state
 from utils.database import PostgresAdapter
 from datetime import datetime
+from utils.users import logout_user, check_or_create_user, get_user_visit_count
 
 def create_navigation_menu(current_page: str):
     """Create consistent navigation menu for all pages
@@ -45,6 +46,22 @@ def clearSessionAndRedirect():
     # This notification might not show since we're redirecting
     ui.notify('Sesión eliminada correctamente')
 
+def logout_session():
+    def confirm_logout():
+        update_user_status(app.storage.browser['user_id'], False)
+        
+        # Navigate to home page
+        ui.navigate.to('/')
+        dialog.close()
+
+    with ui.dialog() as dialog:
+        with ui.card():
+            ui.label('Are you sure you want to logout?').classes('text-h6 q-mb-md')
+            with ui.row().classes('w-full justify-end gap-2'):
+                ui.button('Yes', on_click=confirm_logout).classes('bg-red-500 text-white')
+                ui.button('No', on_click=dialog.close).classes('bg-gray-500 text-white')
+    dialog.open()
+
 def create_navigation_menu_2():
     with ui.header().classes('items-center justify-between'):
         # Left side - Logo
@@ -69,12 +86,12 @@ def create_navigation_menu_2():
         with ui.element('div').classes('ml-auto'):
             # Create menu first
             with ui.menu().classes('mt-2') as menu:
-                with ui.menu_item('Profile'):
+                with ui.menu_item('Profile', on_click=lambda: ui.navigate.to('/profile')):
                     ui.icon('person')
                 with ui.menu_item('Settings'):
                     ui.icon('settings')
                 ui.separator()
-                with ui.menu_item('Logout', on_click=clearSessionAndRedirect).classes('text-red-500'):
+                with ui.menu_item('Logout', on_click=handle_logout).classes('text-red-500'):
                     ui.icon('logout')
             
             # Then create button that opens the menu
@@ -189,3 +206,24 @@ def create_user_selector(container=None, width='w-1/3'):
         ui.notify('User list refreshed', type='positive', position='bottom-right', timeout=1500)
     
     return user_select, refresh_users
+
+def handle_logout():
+    """Handle user logout."""
+    if 'user_id' in app.storage.browser:
+        session_id = app.storage.browser.get('session_id')
+        if session_id:
+            logout_user(session_id)
+        # Clear browser storage
+        app.storage.browser.clear()
+    ui.notify('Logged out successfully')
+
+# When a user visits your site
+user_info = check_or_create_user(app.storage.browser.get('session_id'))
+app.storage.browser['user_id'] = user_info['user_id']
+app.storage.browser['session_id'] = user_info['session_id']
+
+# To get visit count
+visits = get_user_visit_count(app.storage.browser['session_id'])
+
+# When user logs out (via menu)
+handle_logout()
