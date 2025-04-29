@@ -7,6 +7,7 @@ from utils.message_router import MessageRouter
 from pages.reportes import reportes_page
 from pages.admin import page_admin
 from pages.chat import chat_page
+from pages.chat2 import chat_page as chat2_page
 from pages.home import home
 
 # Load environment variables if .env file exists
