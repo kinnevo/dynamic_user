@@ -54,7 +54,7 @@ def create_navigation_menu_2():
         # Middle - Navigation buttons for desktop
         with ui.row().classes('max-sm:hidden flex-grow justify-center gap-2'):
             ui.button('Home', icon='home', on_click=lambda: ui.navigate.to('/home')).props('flat color=white')
-            ui.button('Chat', icon='chat', on_click=lambda: ui.navigate.to('/chat2')).props('flat color=white')
+            ui.button('Chat', icon='chat', on_click=lambda: ui.navigate.to('/chat')).props('flat color=white')
             ui.button('Reports', icon='analytics', on_click=lambda: ui.navigate.to('/reportes')).props('flat color=white')
             
         # Right side - Mobile menu trigger and user menu
@@ -83,7 +83,7 @@ def create_navigation_menu_2():
                 with ui.menu().classes('mt-2') as mobile_menu:
                     with ui.menu_item('Home', on_click=lambda: ui.navigate.to('/home')):
                         ui.icon('home')
-                    with ui.menu_item('Chat', on_click=lambda: ui.navigate.to('/chat2')):
+                    with ui.menu_item('Chat', on_click=lambda: ui.navigate.to('/chat')):
                         ui.icon('chat')
                     with ui.menu_item('Reports', on_click=lambda: ui.navigate.to('/reportes')):
                         ui.icon('analytics')
