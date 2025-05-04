@@ -448,9 +448,13 @@ class AdminPageManager:
                         ui.label('Click row for details').classes('text-sm text-gray-600')
                         ui.button('Refresh', icon='refresh', on_click=lambda: asyncio.create_task(self.initial_load())).props('flat color=primary')
 
+                    # Full-screen semi-transparent overlay
+                    self.loading_overlay = ui.element('div').classes('fixed inset-0 bg-black/50 z-[999]') # Use z-[999] for high z-index
+                    self.loading_overlay.bind_visibility_from(self, 'is_loading')
+
                     # Manual spinner for loading state
-                    self.loading_spinner = ui.spinner('dots', size='lg').classes('text-primary absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50')
-                    self.loading_spinner.bind_visibility_from(self, 'is_loading')
+                    self.loading_spinner = ui.spinner('dots', size='lg').classes('text-white fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-[1000]') # Use z-[1000] for even higher z-index and white color for visibility on dark overlay
+                    self.loading_spinner.bind_visibility_from(self, 'is_loading') # Corrected method name
 
                     users_columns = [
                          {'name': 'user_id', 'field': 'user_id', 'label': 'User ID', 'align': 'left', 'sortable': True}, # Enable sorting if API supports it
