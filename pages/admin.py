@@ -18,7 +18,7 @@ load_dotenv()
 
 # # API Configuration
 # API_BASE_URL = "https://fireportes-production.up.railway.app/api/v1"
-API_BASE_URL = "http://localhost:8000/api/v1/"
+API_BASE_URL = "http://localhost:8000/api/v1/"  # for local development
 API_KEY = os.getenv("FI_ANALYTICS_API_KEY")
 
 if not API_KEY:
@@ -175,8 +175,8 @@ class AdminPageManager:
     def __init__(self):
         # Initialize pagination with rowsNumber = 0
         self.pagination_state = {'page': 1, 'rowsPerPage': 25, 'rowsNumber': 0, 'sortBy': 'user_id', 'descending': False}
-        self.users_table = None  
-        self.analysis_container = None 
+        self.users_table = None
+        self.analysis_container = None
         self.client = None
         # self.total_users = 0 # No longer needed as separate variable
 
@@ -194,22 +194,25 @@ class AdminPageManager:
     async def get_users_page(self, props):
         """Fetches a single page of user data using the new paginated endpoint."""
         if not self.users_table: return
-            
+
         pagination_in = props['pagination']
         page = pagination_in['page']
         rows_per_page = pagination_in['rowsPerPage']
         sort_by = pagination_in.get('sortBy', 'user_id')
         descending = pagination_in.get('descending', False)
 
-        print(f"--> Requesting paginated users: page={page}, limit={rows_per_page}, sort_by={sort_by}, descending={descending}")
+        # print(f"--> Requesting paginated users: page={page}, limit={rows_per_page}, sort_by={sort_by}, descending={descending}")
         skip = (page - 1) * rows_per_page
-        
+
         api_params = {
             'skip': skip,
             'limit': rows_per_page,
             'sort_by': sort_by,
             'descending': descending
         }
+
+        # --- Set loading to true before request ---
+        self.users_table.props('loading=true')
 
         # Fetch data from the new paginated endpoint
         # !!! UPDATE '/users/paginated' if the final endpoint path is different !!!
@@ -231,22 +234,22 @@ class AdminPageManager:
                         last_active_str = datetime.fromisoformat(raw_last_active).strftime("%Y-%m-%d %H:%M:%S")
                     except (ValueError, TypeError):
                         last_active_str = raw_last_active
-                
+
                 table_rows.append({
                     'user_id': user.get('user_id'),
                     'session_id': user.get('session_id'),
                     'logged': 'Yes' if user.get('logged', False) else 'No',
                     'message_count': user.get('message_count', 0),
-                    'start_time': 'Never', 
+                    'start_time': 'Never',
                     'last_activity': last_active_str
                 })
-            
+
             self.users_table.rows = table_rows
-            
+
             new_pagination = dict(pagination_in)
             new_pagination['rowsNumber'] = total_users
-            self.users_table.pagination = new_pagination 
-            self.pagination_state.update(new_pagination) 
+            self.users_table.pagination = new_pagination
+            self.pagination_state.update(new_pagination)
 
             if self.client and self.client.has_socket_connection:
                 js_command = f"Quasar.plugins.Notify.create({{ message: 'Loaded page {page} ({len(table_rows)} of {total_users} users)', type: 'positive', position: 'bottom-right', timeout: 1500 }})"
@@ -258,7 +261,10 @@ class AdminPageManager:
             new_pagination['rowsNumber'] = total_users # Use 0 if fetch failed
             self.users_table.pagination = new_pagination
             self.pagination_state.update(new_pagination)
-            
+
+        # --- Set loading to false after request (success or failure) ---
+        self.users_table.props('loading=false')
+
     async def handle_request_event(self, event_args):
         """Handles the Quasar table's @request event for server-side pagination."""
         # Access event arguments correctly: event_args.args should be the dictionary
@@ -458,7 +464,7 @@ class AdminPageManager:
                     ).classes('w-full')
                     # Enable server-side pagination via @request event
                     # Ensure sortable columns work with the @request event
-                    self.users_table.props('flat bordered separator=cell pagination=@request="onRequest" loading=false') 
+                    self.users_table.props('flat bordered separator=cell pagination=@request="onRequest"')
                     self.users_table.on('request', lambda e: asyncio.create_task(self.handle_request_event(e)))
                     
                     # Schedule initial load
