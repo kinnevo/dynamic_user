@@ -16,8 +16,9 @@ from utils.layouts import create_navigation_menu_2 #, create_date_range_selector
 # Load environment variables
 load_dotenv()
 
-# API Configuration
-API_BASE_URL = "https://fireportes-production.up.railway.app/api/v1"
+# # API Configuration
+# API_BASE_URL = "https://fireportes-production.up.railway.app/api/v1"
+API_BASE_URL = "http://localhost:8000/api/v1/"
 API_KEY = os.getenv("FI_ANALYTICS_API_KEY")
 
 if not API_KEY:
@@ -172,12 +173,11 @@ async def show_user_details(user_data, client=None):
 # --- Admin Page Manager Class --- 
 class AdminPageManager:
     def __init__(self):
-        # Initialize pagination with rowsNumber = 0
+        # Initialize pagination with rowsNumber = 0 (will be updated after fetch)
         self.pagination_state = {'page': 1, 'rowsPerPage': 25, 'rowsNumber': 0, 'sortBy': 'user_id', 'descending': False}
         self.users_table = None  
         self.analysis_container = None 
         self.client = None
-        self.total_users = 0 # Store total user count
 
     async def handle_users_row_click(self, e):
         """Handles row clicks, showing user details."""
@@ -190,66 +190,25 @@ class AdminPageManager:
                  js_command = "Quasar.plugins.Notify.create({ message: 'Could not interpret row click event data', type: 'negative' })"
                  self.client.run_javascript(js_command)
 
-    async def fetch_total_users(self):
-        """Fetches the total number of users from the API."""
-        print("--> Fetching total user count...")
-        count_data = await api_request('GET', '/users/count', client=self.client)
-        if count_data is not None and isinstance(count_data, int):
-            self.total_users = count_data
-            self.pagination_state['rowsNumber'] = self.total_users # Update state
-            print(f"<-- Total users: {self.total_users}")
-        else:
-            print("ERROR fetching or parsing total user count.")
-            # Notification is now handled inside api_request if client is passed
-            self.total_users = 0 # Default to 0 on error
-            self.pagination_state['rowsNumber'] = 0
-
-    async def get_users_page(self, props):
-        """Fetches a single page of user data and updates the table."""
+    async def get_users_page(self, props=None): # props is not strictly needed anymore, but keep for compatibility if called differently
+        """Fetches ALL user data from the API endpoint and updates the table for client-side pagination."""
         if not self.users_table: return
             
-        pagination_in = props['pagination']
-        page = pagination_in['page']
-        rows_per_page = pagination_in['rowsPerPage']
-        # sortBy = pagination_in.get('sortBy') # If API supports sorting
-        # descending = pagination_in.get('descending')
-
-        print(f"--> Requesting users page: {page}, rowsPerPage: {rows_per_page}")
-        skip = (page - 1) * rows_per_page
-        limit = rows_per_page
-
-        # Fetch user data for the current page
-        users_page_data = await api_request('GET', '/users/', client=self.client, params={'skip': skip, 'limit': limit})
+        print(f"--> Requesting ALL users from paginated endpoint...")
+        # Fetch data from the endpoint. No skip/limit needed as it returns all.
+        # !!! UPDATE '/users/paginated' if the final endpoint path is different !!!
+        response_data = await api_request('GET', '/users/paginated', client=self.client) # Remove params for skip/limit
 
         table_rows = []
-        if users_page_data and isinstance(users_page_data, list):
-            # Fetch message counts concurrently
-            message_count_tasks = {}
-            for user in users_page_data:
-                session_id = user.get('session_id')
-                if session_id:
-                    message_count_tasks[session_id] = asyncio.create_task(
-                        api_request('GET', f'/sessions/{session_id}/message-count', client=self.client)
-                    )
-            await asyncio.gather(*message_count_tasks.values(), return_exceptions=True)
+        total_users = 0
 
-            # Process users
-            for user in users_page_data:
-                session_id = user.get('session_id')
-                message_count = 0
-                if session_id in message_count_tasks:
-                    try:
-                        count_result = message_count_tasks[session_id].result()
-                        # Check if the result is int or text that can be int
-                        if isinstance(count_result, int):
-                            message_count = count_result
-                        elif isinstance(count_result, str) and count_result.isdigit():
-                            message_count = int(count_result)
-                        else:
-                            print(f"WARN: Unexpected message count format for session {session_id}: {count_result}")
-                    except Exception as task_e:
-                        print(f"ERROR fetching message count task result for session {session_id}: {task_e}")
+        if response_data and isinstance(response_data, dict) and 'users' in response_data and 'total_users' in response_data:
+            users_data = response_data['users'] # Get all users from the response
+            total_users = response_data['total_users']
+            print(f"<-- Received {len(users_data)} users (total: {total_users})")
 
+            # Process all received users
+            for user in users_data:
                 # Format last_active safely
                 last_active_str = 'Never'
                 raw_last_active = user.get('last_active')
@@ -261,60 +220,50 @@ class AdminPageManager:
                 
                 table_rows.append({
                     'user_id': user.get('user_id'),
-                    'session_id': session_id,
+                    'session_id': user.get('session_id'),
                     'logged': 'Yes' if user.get('logged', False) else 'No',
-                    'message_count': message_count,
-                    'start_time': 'Never', # Still default
+                    'message_count': user.get('message_count', 0), # Get message_count directly
+                    'start_time': 'Never', # Still default or get from API if available
                     'last_activity': last_active_str
                 })
-
-            # Update table rows
+            
+            # Update table rows - provide ALL rows to the table
             self.users_table.rows = table_rows
             
-            # Update table pagination state (including rowsNumber)
-            # Create a new dict to avoid modifying the input 'props' directly if it matters
-            new_pagination = dict(pagination_in)
-            new_pagination['rowsNumber'] = self.total_users # Set the total count
-            self.users_table.pagination = new_pagination # Crucial: Update table component
+            # Update table pagination state - crucial for client-side pagination controls
+            # Set rowsNumber to the total count received from the API
+            # Keep the current page and rowsPerPage settings.
+            current_pagination = self.users_table.pagination # Get the current state from the table component
+            new_pagination = dict(current_pagination) # Create a mutable copy
+            new_pagination['rowsNumber'] = total_users # Set the total count
+            # Ensure current page is valid if total_users is less than (page-1)*rowsPerPage
+            if total_users > 0 and new_pagination['page'] > (total_users + new_pagination['rowsPerPage'] - 1) // new_pagination['rowsPerPage']: # Calculate max page and check
+                 new_pagination['page'] = 1 # Reset to first page if current page is out of bounds
+                 if self.client and self.client.has_socket_connection:
+                     js_command = "Quasar.plugins.Notify.create({ message: 'Page out of bounds, resetting to page 1.', type: 'warning', position: 'bottom' })"
+                     self.client.run_javascript(js_command)
+
+            self.users_table.pagination = new_pagination 
             self.pagination_state.update(new_pagination) # Keep internal state sync
 
             # Send notification
             if self.client and self.client.has_socket_connection:
-                js_command = f"Quasar.plugins.Notify.create({{ message: 'Loaded page {page} ({len(table_rows)} users)', type: 'positive', position: 'bottom-right', timeout: 1500 }})"
-                self.client.run_javascript(js_command)
+                 js_command = f"Quasar.plugins.Notify.create({{ message: 'Loaded {len(table_rows)} of {total_users} users.', type: 'positive', position: 'bottom-right', timeout: 1500 }})"
+                 self.client.run_javascript(js_command)
         else:
+            print("ERROR: Invalid response format from users endpoint or API error.")
             self.users_table.rows = []
-            # Also update pagination state on error to reflect 0 rows for this attempt
-            new_pagination = dict(pagination_in)
-            new_pagination['rowsNumber'] = self.total_users # Keep total count if known
-            self.users_table.pagination = new_pagination
-            self.pagination_state.update(new_pagination)
+            # Reset pagination on error
+            self.users_table.pagination = {'page': 1, 'rowsPerPage': 25, 'rowsNumber': 0}
+            self.pagination_state.update(self.users_table.pagination)
             
-            if self.client and self.client.has_socket_connection:
-                js_command = f"Quasar.plugins.Notify.create({{ message: 'Error loading users page or no users found.', type: 'warning', position: 'top-right' }})"
-                self.client.run_javascript(js_command)
-
-        # No self.users_table.update() needed as assigning to .rows and .pagination triggers updates
-
-    async def handle_request_event(self, event_args):
-        """Handles the Quasar table's @request event for server-side pagination."""
-        # Access event arguments using event_args.args
-        if event_args and hasattr(event_args, 'args') and event_args.args:
-            request_props = event_args.args[0] # Quasar sends args in a list
-            if isinstance(request_props, dict) and 'pagination' in request_props:
-                print(f"Handling @request event with props: {request_props}")
-                # Pass the entire request_props, which contains the requested pagination state
-                await self.get_users_page(request_props) 
-            else:
-                print(f"WARN: @request event with unexpected props format: {request_props}")
-        else:
-            print("WARN: @request event with missing or invalid arguments.")
+            # Notification handled by api_request now
 
     async def initial_load(self):
-        """Performs the initial data load: fetch total count then first page."""
-        await self.fetch_total_users() # Fetch total count first
-        # Pass the current pagination state for the initial load
-        await self.get_users_page({'pagination': self.pagination_state}) 
+        """Performs the initial data load by fetching all users."""
+        print("Performing initial user load...")
+        # Call get_users_page to fetch all data
+        await self.get_users_page()
         
     async def generate_macro_analysis(self, max_summaries_input, tabs_ref): # Pass UI elements if needed
         """Handles the macro analysis generation."""
@@ -459,16 +408,17 @@ class AdminPageManager:
                 with ui.tab_panel('Users Table'):
                     with ui.row().classes('w-full justify-between items-center mb-4'):
                         ui.label('Click row for details').classes('text-sm text-gray-600')
+                        # Refresh button triggers initial_load again
                         ui.button('Refresh', icon='refresh', on_click=lambda: asyncio.create_task(self.initial_load())).props('flat color=primary')
 
                     users_columns = [
-                         {'name': 'user_id', 'field': 'user_id', 'label': 'User ID', 'align': 'left', 'sortable': False},
+                         {'name': 'user_id', 'field': 'user_id', 'label': 'User ID', 'align': 'left', 'sortable': True}, # Enable sorting if API supports it
                          {'name': 'session_id', 'field': 'session_id', 'label': 'Session ID', 'align': 'left', 'sortable': False},
                          {'name': 'logged', 'field': 'logged', 'label': 'Logged', 'align': 'center', 'sortable': False},
-                         {'name': 'message_count', 'field': 'message_count', 'label': 'Messages', 'align': 'center', 'sortable': False},
-                         {'name': 'start_time', 'field': 'start_time', 'label': 'Started', 'align': 'center', 'sortable': False},
-                         {'name': 'last_activity', 'field': 'last_activity', 'label': 'Last Activity', 'align': 'center', 'sortable': False}
-                    ] # Disable sorting as API doesn't support it
+                         {'name': 'message_count', 'field': 'message_count', 'label': 'Messages', 'align': 'center', 'sortable': True}, # Enable sorting
+                         {'name': 'start_time', 'field': 'start_time', 'label': 'Started', 'align': 'center', 'sortable': False}, # Or True if API supports
+                         {'name': 'last_activity', 'field': 'last_activity', 'label': 'Last Activity', 'align': 'center', 'sortable': True} # Enable sorting
+                    ]
 
                     # Create the table, binding pagination to the class state
                     self.users_table = ui.table(
@@ -476,9 +426,10 @@ class AdminPageManager:
                         pagination=self.pagination_state, # Bind to the reactive dict
                         on_select=lambda e: asyncio.create_task(self.handle_users_row_click(e)),
                     ).classes('w-full')
-                    # Enable server-side pagination via @request event
-                    self.users_table.props('flat bordered separator=cell pagination=@request="onRequest" loading=false') # Added loading=false initially
-                    self.users_table.on('request', lambda e: asyncio.create_task(self.handle_request_event(e)))
+                    # REMOVE server-side pagination props and event handler
+                    # The table will handle pagination and sorting client-side with all data
+                    self.users_table.props('flat bordered separator=cell loading=false') 
+                    # REMOVE self.users_table.on('request', ...) call
                     
                     # Schedule initial load
                     ui.timer(0.1, lambda: asyncio.create_task(self.initial_load()), once=True)
