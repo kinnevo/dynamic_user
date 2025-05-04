@@ -89,7 +89,7 @@ async def api_request(method: str, endpoint: str, client=None, params: dict = No
 
 # --- Dialog Handler Function ---
 async def show_user_details(user_data, client=None):
-    """Creates and shows a dialog with user details and conversation history."""
+    """Creates and shows a dialog with user details and conversation history in a chat UI."""
     # Extract user data
     if isinstance(user_data, dict):
         session_id = user_data.get('session_id', 'N/A')
@@ -99,76 +99,46 @@ async def show_user_details(user_data, client=None):
         # Unexpected data format
         return
     
-    with ui.dialog() as dialog, ui.card().classes('w-[50vw] max-w-[75vw]').style('max-width: 75vw !important'):
-        # Header
-        with ui.row().classes('w-full bg-primary text-white p-4'):
-            ui.label(f"Details for User: {user_id}").classes('text-h6')
+    # Create a persistent UI element to hold the dialog
+    # We'll use local storage to pass data
+    if client and client.has_socket_connection:
+        # Store the user details in client-side storage temporarily
+        storage_key = f"user_details_{user_id}_{session_id}"
+        js_command = f"""
+            localStorage.setItem('{storage_key}', JSON.stringify({json.dumps(user_data)}));
+            // Create a custom event to signal data is ready
+            document.dispatchEvent(new CustomEvent('showUserDetails', {{detail: '{storage_key}'}}));
+        """
+        await client.run_javascript(js_command)
         
-        # User details section
-        with ui.column().classes('p-4'):
-            ui.label(f"User ID: {user_id}")
-            ui.label(f"Session ID: {session_id}")
-            ui.label(f"Logged Status: {logged}")
+        # Fetch messages asynchronously
+        messages_data = await api_request('GET', f'/sessions/{session_id}/recent-messages', client=client, params={'limit': 20})
         
-        # Messages section header
-        ui.label('Recent Conversation').classes('text-h6 p-4 pt-0')
-        
-        # Messages container
-        with ui.column().classes('w-full h-[500px] overflow-y-auto p-4 gap-2 border rounded mx-4') as messages_container:
-            # Show loading state initially
-            with messages_container:
-                ui.spinner(size='lg').classes('mx-auto')
-        
-        # Footer with close button
-        with ui.row().classes('w-full justify-end p-4'):
-            ui.button('Close', on_click=dialog.close).props('flat')
-    
-    dialog.open()
+        # Store messages data in client-side storage
+        if messages_data:
+            messages_storage_key = f"user_messages_{user_id}_{session_id}"
+            js_command = f"""
+                localStorage.setItem('{messages_storage_key}', JSON.stringify({json.dumps(messages_data)}));
+                // Dispatch event to update messages
+                document.dispatchEvent(new CustomEvent('updateUserMessages', {{detail: '{messages_storage_key}'}}));
+            """
+            await client.run_javascript(js_command)
+    else:
+        print("Cannot show user details: No client connection available")
 
-    # Fetch messages asynchronously after opening the dialog
-    messages_data = await api_request('GET', f'/sessions/{session_id}/recent-messages', client=client, params={'limit': 20})
+async def show_summary_details(summary_data, client=None):
+    """Shows a half-screen modal with all summary metadata and the full summary."""
+    if not isinstance(summary_data, dict) or not client or not client.has_socket_connection:
+        return
     
-    # Clear loading spinner and populate messages
-    messages_container.clear()
-    
-    if messages_data and isinstance(messages_data, list):
-        if not messages_data:
-            with messages_container:
-                ui.label("No messages found for this session").classes('text-gray-500 italic')
-        else:
-            messages_data.sort(key=lambda x: x.get('timestamp', '')) # Sort by timestamp if needed (API might return sorted)
-            with messages_container:
-                for msg in messages_data:
-                    role = msg.get('role')
-                    content = msg.get('content')
-                    timestamp_str = msg.get('timestamp')
-                    
-                    # Parse timestamp safely
-                    try:
-                        timestamp = datetime.fromisoformat(timestamp_str) if timestamp_str else None
-                        time_str = timestamp.strftime("%Y-%m-%d %H:%M:%S") if timestamp else "Unknown time"
-                    except ValueError:
-                        time_str = timestamp_str if timestamp_str else "Invalid time format" # Display raw string if parsing fails
-
-                    if role == 'user':
-                        with ui.element('div').classes('self-end bg-blue-500 text-white p-3 rounded-lg max-w-[80%]'):
-                            ui.label(f"{time_str}").classes('text-xs opacity-70 mb-1')
-                            ui.markdown(content)
-                    elif role == 'assistant' or role == 'ai': # Handle potential 'ai' role
-                         with ui.element('div').classes('self-start bg-gray-200 p-3 rounded-lg max-w-[80%]'):
-                            ui.label(f"{time_str}").classes('text-xs opacity-70 mb-1')
-                            ui.markdown(content)
-                    else: # Handle unknown roles if necessary
-                        with ui.element('div').classes('self-center bg-yellow-100 p-3 rounded-lg max-w-[80%]'):
-                             ui.label(f"{time_str} - Role: {role}").classes('text-xs opacity-70 mb-1')
-                             ui.markdown(content)
-
-    elif messages_data is None: # API call failed
-        with messages_container:
-            ui.label(f"Error fetching messages. Check API connection.").classes('text-red-500')
-    else: # Unexpected data format
-        with messages_container:
-            ui.label(f"Unexpected data format received for messages.").classes('text-orange-500')
+    # Store the summary details in client-side storage temporarily
+    storage_key = f"summary_details_{summary_data.get('summary_id', 'unknown')}"
+    js_command = f"""
+        localStorage.setItem('{storage_key}', JSON.stringify({json.dumps(summary_data)}));
+        // Create a custom event to signal data is ready
+        document.dispatchEvent(new CustomEvent('showSummaryDetails', {{detail: '{storage_key}'}}));
+    """
+    await client.run_javascript(js_command)
 
 # --- Admin Page Manager Class --- 
 class AdminPageManager:
@@ -190,6 +160,8 @@ class AdminPageManager:
         print(f"Row selected: {e}")
         if isinstance(e, dict):  # Check if we got row data
             await show_user_details(e, client=self.client)
+            if self.users_table:
+                self.users_table.selected = []
         elif e is None: pass # Handle deselection if needed
         else: 
             if self.client and self.client.has_socket_connection:
@@ -562,14 +534,7 @@ class AdminPageManager:
                 ui.label(f'Found {len(rows)} summaries').classes('text-h6 mt-4 mb-2')
                 
                 # Create the table with the data
-                summaries_table = ui.table(
-                    columns=columns,
-                    rows=rows,
-                    row_key='summary_id'
-                ).classes('w-full')
-                
-                # Enable expanding rows to see full summary
-                summaries_table.props('flat bordered separator=cell')
+                summaries_table = self.show_summaries_table(columns, rows)
                 
                 # Show success notification
                 if self.client and self.client.has_socket_connection:
@@ -670,14 +635,7 @@ class AdminPageManager:
                 ui.label(f'Found {len(rows)} summaries').classes('text-h6 mt-4 mb-2')
                 
                 # Create the table with the data
-                summaries_table = ui.table(
-                    columns=columns,
-                    rows=rows,
-                    row_key='summary_id'
-                ).classes('w-full')
-                
-                # Enable expanding rows to see full summary
-                summaries_table.props('flat bordered separator=cell')
+                summaries_table = self.show_summaries_table(columns, rows)
                 
                 # Show success notification
                 if self.client and self.client.has_socket_connection:
@@ -688,6 +646,153 @@ class AdminPageManager:
                 if self.client and self.client.has_socket_connection:
                     js_command = "Quasar.plugins.Notify.create({ message: 'No summaries found for the specified criteria', type: 'warning', timeout: 3000 })"
                     self.client.run_javascript(js_command)
+
+    def show_summaries_table(self, columns, rows):
+        """Helper to create the summaries table with row click handler."""
+        table = ui.table(
+            columns=columns,
+            rows=rows,
+            row_key='summary_id',
+        ).classes('w-full')
+        table.props('flat bordered separator=cell')
+        # Add row click handler via rowClick event
+        table.on('rowClick', lambda e: asyncio.create_task(show_summary_details(e.args[1], client=self.client)))
+        return table
+
+    def setup_dialog_listeners(self):
+        """Sets up event listeners for dialog creation from background tasks."""
+        # Add JavaScript to handle showing user details dialog
+        js_code = """
+        document.addEventListener('showUserDetails', function(e) {
+            var storageKey = e.detail;
+            var userData = JSON.parse(localStorage.getItem(storageKey));
+            if (!userData) return;
+            
+            // Use NiceGUI's UI functions to display the dialog
+            // This event will be caught by the Python side
+            window._nicegui.push_event('createUserDialog', userData);
+        });
+        
+        document.addEventListener('updateUserMessages', function(e) {
+            var storageKey = e.detail;
+            var messagesData = JSON.parse(localStorage.getItem(storageKey));
+            if (!messagesData) return;
+            
+            // Push event to update messages
+            window._nicegui.push_event('updateDialogMessages', messagesData);
+        });
+        
+        document.addEventListener('showSummaryDetails', function(e) {
+            var storageKey = e.detail;
+            var summaryData = JSON.parse(localStorage.getItem(storageKey));
+            if (!summaryData) return;
+            
+            // Use NiceGUI's UI functions to display the dialog
+            window._nicegui.push_event('createSummaryDialog', summaryData);
+        });
+        """
+        ui.add_body_html(f"<script>{js_code}</script>")
+        
+        # Create dialog elements in a persistent location
+        # User dialog
+        @ui.page('/admin/_user_dialog_container')
+        def user_dialog_container():
+            self.user_dialog = ui.dialog()
+            self.messages_container = None
+            
+            @ui.event('createUserDialog')
+            def on_create_dialog(user_data):
+                self.user_dialog.clear()
+                with self.user_dialog, ui.card().classes('w-[50vw] max-w-[75vw]').style('max-width: 75vw !important; max-height: 80vh; overflow-y: auto;'):
+                    # Header
+                    with ui.row().classes('w-full bg-primary text-white p-4'):
+                        ui.label(f"Details for User: {user_data.get('user_id', 'N/A')}").classes('text-h6')
+                    # User details section
+                    with ui.column().classes('p-4'):
+                        ui.label(f"User ID: {user_data.get('user_id', 'N/A')}")
+                        ui.label(f"Session ID: {user_data.get('session_id', 'N/A')}")
+                        ui.label(f"Logged Status: {user_data.get('logged', 'N/A')}")
+                    # Messages section header
+                    ui.label('Recent Conversation').classes('text-h6 p-4 pt-0')
+                    # Chat messages container
+                    self.messages_container = ui.column().classes('w-full h-[40vh] overflow-y-auto p-4 gap-2 border rounded mx-4 bg-white')
+                    with self.messages_container:
+                        ui.spinner(size='lg').classes('mx-auto')
+                    # Footer with close button
+                    with ui.row().classes('w-full justify-end p-4'):
+                        ui.button('Close', on_click=self.user_dialog.close).props('flat')
+                
+                self.user_dialog.open()
+            
+            @ui.event('updateDialogMessages')
+            def on_update_messages(messages_data):
+                if not self.messages_container:
+                    return
+                    
+                self.messages_container.clear()
+                if not messages_data:
+                    with self.messages_container:
+                        ui.label("No messages found for this session").classes('text-gray-500 italic')
+                    return
+                    
+                # Sort by timestamp
+                messages_data.sort(key=lambda x: x.get('timestamp', ''))
+                
+                for msg in messages_data:
+                    role = msg.get('role')
+                    content = msg.get('content')
+                    timestamp_str = msg.get('timestamp')
+                    # Parse timestamp safely
+                    try:
+                        timestamp = datetime.fromisoformat(timestamp_str) if timestamp_str else None
+                        time_str = timestamp.strftime("%Y-%m-%d %H:%M:%S") if timestamp else "Unknown time"
+                    except ValueError:
+                        time_str = timestamp_str if timestamp_str else "Invalid time format"
+                    
+                    if role == 'user':
+                        with self.messages_container:
+                            with ui.element('div').classes('self-end bg-blue-500 text-white p-3 rounded-lg max-w-[80%]'):
+                                ui.label(f"{time_str}").classes('text-xs opacity-70 mb-1')
+                                ui.markdown(content)
+                    elif role == 'assistant' or role == 'ai':
+                        with self.messages_container:
+                            with ui.element('div').classes('self-start bg-gray-200 p-3 rounded-lg max-w-[80%]'):
+                                ui.label(f"{time_str}").classes('text-xs opacity-70 mb-1')
+                                ui.markdown(content)
+                    else:
+                        with self.messages_container:
+                            with ui.element('div').classes('self-center bg-yellow-100 p-3 rounded-lg max-w-[80%]'):
+                                ui.label(f"{time_str} - Role: {role}").classes('text-xs opacity-70 mb-1')
+                                ui.markdown(content)
+        
+        # Summary dialog
+        @ui.page('/admin/_summary_dialog_container')
+        def summary_dialog_container():
+            self.summary_dialog = ui.dialog()
+            
+            @ui.event('createSummaryDialog')
+            def on_create_summary_dialog(summary_data):
+                self.summary_dialog.clear()
+                with self.summary_dialog, ui.card().classes('w-[50vw] max-w-[75vw]').style('max-width: 75vw !important; max-height: 80vh; overflow-y: auto;'):
+                    with ui.row().classes('w-full bg-primary text-white p-4'):
+                        ui.label(f"Summary Details").classes('text-h6')
+                    with ui.column().classes('p-4'):
+                        ui.label(f"Summary ID: {summary_data.get('summary_id', 'N/A')}")
+                        ui.label(f"User ID: {summary_data.get('user_id', 'N/A')}")
+                        ui.label(f"Session ID: {summary_data.get('session_id', 'N/A')}")
+                        ui.label(f"Created At: {summary_data.get('created_at', 'N/A')}")
+                        ui.label(f"Logged: {'Yes' if summary_data.get('logged') else 'No'}")
+                        ui.label('Summary:').classes('text-h6 mt-4')
+                        with ui.element('div').classes('bg-gray-100 p-4 rounded-lg w-full max-h-[40vh] overflow-y-auto'):
+                            ui.markdown(summary_data.get('summary', ''))
+                    with ui.row().classes('w-full justify-end p-4'):
+                        ui.button('Close', on_click=self.summary_dialog.close).props('flat')
+            
+                self.summary_dialog.open()
+        
+        # Create invisible iframes to load these pages
+        ui.html(f'<iframe src="/admin/_user_dialog_container" style="display:none;"></iframe>')
+        ui.html(f'<iframe src="/admin/_summary_dialog_container" style="display:none;"></iframe>')
 
     def build_ui(self):
         """Builds the NiceGUI elements for the admin page."""
@@ -706,6 +811,9 @@ class AdminPageManager:
                 ui.tab('Macro Analysis', icon='analytics')
             tabs.set_value('Users Table')
 
+            # Set up dialog listeners for background task UI
+            self.setup_dialog_listeners()
+            
             with ui.tab_panels(tabs, value='Users Table').classes('w-full').props('animated keep-alive'):
                 # --- Users Table Panel --- 
                 with ui.tab_panel('Users Table'):
@@ -734,13 +842,14 @@ class AdminPageManager:
                     self.users_table = ui.table(
                         columns=users_columns, rows=[], row_key='user_id',
                         pagination=self.pagination_state, # Bind to the reactive dict
-                        on_select=lambda e: asyncio.create_task(self.handle_users_row_click(e)),
                     ).classes('w-full')
                     # Enable server-side pagination via @request event
                     # Ensure sortable columns work with the @request event
                     self.users_table.props('flat bordered separator=cell pagination=@request="onRequest"')
                     self.users_table.on('request', lambda e: asyncio.create_task(self.handle_request_event(e)))
                     self.users_table.props('loading=false') # Ensure built-in loading is off
+                    # Add row click handler via rowClick event
+                    self.users_table.on('rowClick', lambda e: asyncio.create_task(self.handle_users_row_click(e.args[1])))
                     
                     # Schedule initial load
                     ui.timer(0.1, lambda: asyncio.create_task(self.initial_load()), once=True)
