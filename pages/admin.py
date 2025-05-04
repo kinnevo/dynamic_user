@@ -91,54 +91,227 @@ async def api_request(method: str, endpoint: str, client=None, params: dict = No
 async def show_user_details(user_data, client=None):
     """Creates and shows a dialog with user details and conversation history in a chat UI."""
     # Extract user data
-    if isinstance(user_data, dict):
-        session_id = user_data.get('session_id', 'N/A')
-        user_id = user_data.get('user_id', 'N/A')
-        logged = user_data.get('logged', 'N/A')
-    else:
-        # Unexpected data format
+    if not isinstance(user_data, dict) or not client or not client.has_socket_connection:
         return
     
-    # Create a persistent UI element to hold the dialog
-    # We'll use local storage to pass data
-    if client and client.has_socket_connection:
-        # Store the user details in client-side storage temporarily
-        storage_key = f"user_details_{user_id}_{session_id}"
-        js_command = f"""
-            localStorage.setItem('{storage_key}', JSON.stringify({json.dumps(user_data)}));
-            // Create a custom event to signal data is ready
-            document.dispatchEvent(new CustomEvent('showUserDetails', {{detail: '{storage_key}'}}));
-        """
-        await client.run_javascript(js_command)
+    session_id = user_data.get('session_id', 'N/A')
+    user_id = user_data.get('user_id', 'N/A')
+    logged = user_data.get('logged', 'N/A')
+    
+    # Create a placeholder element to avoid the UI context issue
+    placeholder_id = f"user_modal_{user_id}"
+    
+    # Create modal using JavaScript
+    js_code = f"""
+    // Create modal container if it doesn't exist
+    let modalContainer = document.getElementById("{placeholder_id}");
+    if (!modalContainer) {{
+        modalContainer = document.createElement('div');
+        modalContainer.id = "{placeholder_id}";
+        modalContainer.classList.add('fixed', 'inset-0', 'bg-black', 'bg-opacity-30', 
+            'flex', 'items-center', 'justify-center', 'z-50');
+        modalContainer.style.display = 'flex';
         
-        # Fetch messages asynchronously
-        messages_data = await api_request('GET', f'/sessions/{session_id}/recent-messages', client=client, params={'limit': 20})
+        // Create modal content
+        let modalContent = document.createElement('div');
+        modalContent.classList.add('bg-white', 'rounded-lg', 'shadow-xl', 'w-1/2', 
+            'max-w-2xl', 'max-h-[80vh]', 'overflow-y-auto', 'flex', 'flex-col');
         
-        # Store messages data in client-side storage
-        if messages_data:
-            messages_storage_key = f"user_messages_{user_id}_{session_id}"
-            js_command = f"""
-                localStorage.setItem('{messages_storage_key}', JSON.stringify({json.dumps(messages_data)}));
-                // Dispatch event to update messages
-                document.dispatchEvent(new CustomEvent('updateUserMessages', {{detail: '{messages_storage_key}'}}));
-            """
-            await client.run_javascript(js_command)
+        // Header
+        let header = document.createElement('div');
+        header.classList.add('bg-primary', 'text-white', 'p-4', 'flex', 'justify-between', 'items-center');
+        let title = document.createElement('h3');
+        title.textContent = "Details for User: {user_id}";
+        title.classList.add('text-lg', 'font-bold');
+        let closeBtn = document.createElement('button');
+        closeBtn.textContent = "×";
+        closeBtn.classList.add('text-xl', 'font-bold');
+        closeBtn.onclick = function() {{
+            document.body.removeChild(modalContainer);
+        }};
+        header.appendChild(title);
+        header.appendChild(closeBtn);
+        
+        // User details section
+        let details = document.createElement('div');
+        details.classList.add('p-4');
+        details.innerHTML = `
+            <p class="mb-2">User ID: {user_id}</p>
+            <p class="mb-2">Session ID: {session_id}</p>
+            <p class="mb-2">Logged Status: {logged}</p>
+        `;
+        
+        // Messages section
+        let messagesHeader = document.createElement('h4');
+        messagesHeader.textContent = 'Recent Conversation';
+        messagesHeader.classList.add('font-bold', 'p-4', 'pt-0');
+        
+        let messagesContainer = document.createElement('div');
+        messagesContainer.id = "messages_{user_id}";
+        messagesContainer.classList.add('w-full', 'h-[40vh]', 'overflow-y-auto', 'p-4', 
+            'gap-2', 'border', 'rounded', 'mx-4', 'bg-white', 'mb-4');
+        
+        // Loading spinner
+        messagesContainer.innerHTML = '<div class="flex justify-center items-center h-full"><div class="spinner-border text-primary" role="status"></div></div>';
+        
+        // Footer
+        let footer = document.createElement('div');
+        footer.classList.add('p-4', 'flex', 'justify-end');
+        let closeButton = document.createElement('button');
+        closeButton.textContent = "Close";
+        closeButton.classList.add('px-4', 'py-2', 'bg-primary', 'text-white', 'rounded');
+        closeButton.onclick = function() {{
+            document.body.removeChild(modalContainer);
+        }};
+        footer.appendChild(closeButton);
+        
+        // Assemble modal
+        modalContent.appendChild(header);
+        modalContent.appendChild(details);
+        modalContent.appendChild(messagesHeader);
+        modalContent.appendChild(messagesContainer);
+        modalContent.appendChild(footer);
+        
+        modalContainer.appendChild(modalContent);
+        document.body.appendChild(modalContainer);
+    }}
+    """
+    
+    await client.run_javascript(js_code)
+    
+    # Fetch messages asynchronously
+    messages_data = await api_request('GET', f'/sessions/{session_id}/recent-messages', client=client, params={'limit': 20})
+    
+    # Format and display messages
+    messages_html = ""
+    if messages_data and isinstance(messages_data, list):
+        if not messages_data:
+            messages_html = '<p class="text-gray-500 italic">No messages found for this session</p>'
+        else:
+            messages_data.sort(key=lambda x: x.get('timestamp', ''))
+            for msg in messages_data:
+                role = msg.get('role')
+                content = msg.get('content')
+                timestamp_str = msg.get('timestamp')
+                
+                # Parse timestamp safely
+                try:
+                    timestamp = datetime.fromisoformat(timestamp_str) if timestamp_str else None
+                    time_str = timestamp.strftime("%Y-%m-%d %H:%M:%S") if timestamp else "Unknown time"
+                except ValueError:
+                    time_str = timestamp_str if timestamp_str else "Invalid time format"
+                
+                # Create HTML for message bubble based on role
+                bubble_class = "self-end bg-blue-500 text-white" if role == 'user' else "self-start bg-gray-200"
+                if role not in ['user', 'assistant', 'ai']:
+                    bubble_class = "self-center bg-yellow-100"
+                    content = f"Role: {role}<br>{content}"
+                
+                messages_html += f"""
+                <div class="flex {'justify-end' if role == 'user' else 'justify-start'} mb-4">
+                    <div class="p-3 rounded-lg max-w-[80%] {bubble_class}">
+                        <div class="text-xs opacity-70 mb-1">{time_str}</div>
+                        <div>{content}</div>
+                    </div>
+                </div>
+                """
+    elif messages_data is None:
+        messages_html = '<p class="text-red-500">Error fetching messages. Check API connection.</p>'
     else:
-        print("Cannot show user details: No client connection available")
+        messages_html = '<p class="text-orange-500">Unexpected data format received for messages.</p>'
+    
+    # Update messages container with fetched data
+    update_js = f"""
+    let messagesContainer = document.getElementById("messages_{user_id}");
+    if (messagesContainer) {{
+        messagesContainer.innerHTML = `{messages_html.replace('`', '\\`').replace("'", "\\'")}`;
+    }}
+    """
+    
+    await client.run_javascript(update_js)
 
 async def show_summary_details(summary_data, client=None):
     """Shows a half-screen modal with all summary metadata and the full summary."""
     if not isinstance(summary_data, dict) or not client or not client.has_socket_connection:
         return
     
-    # Store the summary details in client-side storage temporarily
-    storage_key = f"summary_details_{summary_data.get('summary_id', 'unknown')}"
-    js_command = f"""
-        localStorage.setItem('{storage_key}', JSON.stringify({json.dumps(summary_data)}));
-        // Create a custom event to signal data is ready
-        document.dispatchEvent(new CustomEvent('showSummaryDetails', {{detail: '{storage_key}'}}));
+    summary_id = summary_data.get('summary_id', 'unknown')
+    user_id = summary_data.get('user_id', 'N/A')
+    session_id = summary_data.get('session_id', 'N/A')
+    created_at = summary_data.get('created_at', 'N/A')
+    logged = 'Yes' if summary_data.get('logged') else 'No'
+    summary_text = summary_data.get('summary', '').replace('`', '\\`').replace("'", "\\'").replace('\n', '<br>')
+    
+    placeholder_id = f"summary_modal_{summary_id}"
+    
+    # Create modal using JavaScript
+    js_code = f"""
+    // Create modal container if it doesn't exist
+    let modalContainer = document.getElementById("{placeholder_id}");
+    if (!modalContainer) {{
+        modalContainer = document.createElement('div');
+        modalContainer.id = "{placeholder_id}";
+        modalContainer.classList.add('fixed', 'inset-0', 'bg-black', 'bg-opacity-30', 
+            'flex', 'items-center', 'justify-center', 'z-50');
+        modalContainer.style.display = 'flex';
+        
+        // Create modal content
+        let modalContent = document.createElement('div');
+        modalContent.classList.add('bg-white', 'rounded-lg', 'shadow-xl', 'w-1/2', 
+            'max-w-2xl', 'max-h-[80vh]', 'overflow-y-auto', 'flex', 'flex-col');
+        
+        // Header
+        let header = document.createElement('div');
+        header.classList.add('bg-primary', 'text-white', 'p-4', 'flex', 'justify-between', 'items-center');
+        let title = document.createElement('h3');
+        title.textContent = "Summary Details";
+        title.classList.add('text-lg', 'font-bold');
+        let closeBtn = document.createElement('button');
+        closeBtn.textContent = "×";
+        closeBtn.classList.add('text-xl', 'font-bold');
+        closeBtn.onclick = function() {{
+            document.body.removeChild(modalContainer);
+        }};
+        header.appendChild(title);
+        header.appendChild(closeBtn);
+        
+        // Summary details section
+        let details = document.createElement('div');
+        details.classList.add('p-4');
+        details.innerHTML = `
+            <p class="mb-2">Summary ID: {summary_id}</p>
+            <p class="mb-2">User ID: {user_id}</p>
+            <p class="mb-2">Session ID: {session_id}</p>
+            <p class="mb-2">Created At: {created_at}</p>
+            <p class="mb-2">Logged: {logged}</p>
+            <h4 class="font-bold mt-4 mb-2">Summary:</h4>
+            <div class="bg-gray-100 p-4 rounded-lg w-full max-h-[40vh] overflow-y-auto">
+                {summary_text}
+            </div>
+        `;
+        
+        // Footer
+        let footer = document.createElement('div');
+        footer.classList.add('p-4', 'flex', 'justify-end');
+        let closeButton = document.createElement('button');
+        closeButton.textContent = "Close";
+        closeButton.classList.add('px-4', 'py-2', 'bg-primary', 'text-white', 'rounded');
+        closeButton.onclick = function() {{
+            document.body.removeChild(modalContainer);
+        }};
+        footer.appendChild(closeButton);
+        
+        // Assemble modal
+        modalContent.appendChild(header);
+        modalContent.appendChild(details);
+        modalContent.appendChild(footer);
+        
+        modalContainer.appendChild(modalContent);
+        document.body.appendChild(modalContainer);
+    }}
     """
-    await client.run_javascript(js_command)
+    
+    await client.run_javascript(js_code)
 
 # --- Admin Page Manager Class --- 
 class AdminPageManager:
@@ -150,6 +323,8 @@ class AdminPageManager:
         self.analysis_container = None
         self.summaries_container = None
         self.client = None
+        # Flag to track if initial load has been triggered
+        self._load_triggered = False
         # Common parameters for analysis and summaries
         self.date_selectors = None
         self.user_selector = None
@@ -258,11 +433,21 @@ class AdminPageManager:
 
     async def initial_load(self):
         """Performs the initial data load using the new paginated endpoint."""
-        # REMOVE call to self.fetch_total_users()
-        # Call get_users_page directly with the initial state
-        print("Performing initial user load...")
-        await self.get_users_page({'pagination': self.pagination_state}) 
+        # Add a guard to prevent multiple calls
+        if self.is_loading:  # Skip if already loading
+            print("Skipping duplicate initial_load call - already loading")
+            return
         
+        # Set loading state to true
+        self.is_loading = True
+        
+        try:
+            print("Performing initial user load...")
+            await self.get_users_page({'pagination': self.pagination_state})
+        finally:
+            # Make sure to reset the loading state even if there's an error
+            self.is_loading = False
+
     async def generate_macro_analysis(self, max_summaries_input, tabs_ref):
         """Handles the macro analysis generation."""
         if not self.analysis_container: return
@@ -659,141 +844,6 @@ class AdminPageManager:
         table.on('rowClick', lambda e: asyncio.create_task(show_summary_details(e.args[1], client=self.client)))
         return table
 
-    def setup_dialog_listeners(self):
-        """Sets up event listeners for dialog creation from background tasks."""
-        # Add JavaScript to handle showing user details dialog
-        js_code = """
-        document.addEventListener('showUserDetails', function(e) {
-            var storageKey = e.detail;
-            var userData = JSON.parse(localStorage.getItem(storageKey));
-            if (!userData) return;
-            
-            // Use NiceGUI's UI functions to display the dialog
-            // This event will be caught by the Python side
-            window._nicegui.push_event('createUserDialog', userData);
-        });
-        
-        document.addEventListener('updateUserMessages', function(e) {
-            var storageKey = e.detail;
-            var messagesData = JSON.parse(localStorage.getItem(storageKey));
-            if (!messagesData) return;
-            
-            // Push event to update messages
-            window._nicegui.push_event('updateDialogMessages', messagesData);
-        });
-        
-        document.addEventListener('showSummaryDetails', function(e) {
-            var storageKey = e.detail;
-            var summaryData = JSON.parse(localStorage.getItem(storageKey));
-            if (!summaryData) return;
-            
-            // Use NiceGUI's UI functions to display the dialog
-            window._nicegui.push_event('createSummaryDialog', summaryData);
-        });
-        """
-        ui.add_body_html(f"<script>{js_code}</script>")
-        
-        # Create dialog elements in a persistent location
-        # User dialog
-        @ui.page('/admin/_user_dialog_container')
-        def user_dialog_container():
-            self.user_dialog = ui.dialog()
-            self.messages_container = None
-            
-            @ui.event('createUserDialog')
-            def on_create_dialog(user_data):
-                self.user_dialog.clear()
-                with self.user_dialog, ui.card().classes('w-[50vw] max-w-[75vw]').style('max-width: 75vw !important; max-height: 80vh; overflow-y: auto;'):
-                    # Header
-                    with ui.row().classes('w-full bg-primary text-white p-4'):
-                        ui.label(f"Details for User: {user_data.get('user_id', 'N/A')}").classes('text-h6')
-                    # User details section
-                    with ui.column().classes('p-4'):
-                        ui.label(f"User ID: {user_data.get('user_id', 'N/A')}")
-                        ui.label(f"Session ID: {user_data.get('session_id', 'N/A')}")
-                        ui.label(f"Logged Status: {user_data.get('logged', 'N/A')}")
-                    # Messages section header
-                    ui.label('Recent Conversation').classes('text-h6 p-4 pt-0')
-                    # Chat messages container
-                    self.messages_container = ui.column().classes('w-full h-[40vh] overflow-y-auto p-4 gap-2 border rounded mx-4 bg-white')
-                    with self.messages_container:
-                        ui.spinner(size='lg').classes('mx-auto')
-                    # Footer with close button
-                    with ui.row().classes('w-full justify-end p-4'):
-                        ui.button('Close', on_click=self.user_dialog.close).props('flat')
-                
-                self.user_dialog.open()
-            
-            @ui.event('updateDialogMessages')
-            def on_update_messages(messages_data):
-                if not self.messages_container:
-                    return
-                    
-                self.messages_container.clear()
-                if not messages_data:
-                    with self.messages_container:
-                        ui.label("No messages found for this session").classes('text-gray-500 italic')
-                    return
-                    
-                # Sort by timestamp
-                messages_data.sort(key=lambda x: x.get('timestamp', ''))
-                
-                for msg in messages_data:
-                    role = msg.get('role')
-                    content = msg.get('content')
-                    timestamp_str = msg.get('timestamp')
-                    # Parse timestamp safely
-                    try:
-                        timestamp = datetime.fromisoformat(timestamp_str) if timestamp_str else None
-                        time_str = timestamp.strftime("%Y-%m-%d %H:%M:%S") if timestamp else "Unknown time"
-                    except ValueError:
-                        time_str = timestamp_str if timestamp_str else "Invalid time format"
-                    
-                    if role == 'user':
-                        with self.messages_container:
-                            with ui.element('div').classes('self-end bg-blue-500 text-white p-3 rounded-lg max-w-[80%]'):
-                                ui.label(f"{time_str}").classes('text-xs opacity-70 mb-1')
-                                ui.markdown(content)
-                    elif role == 'assistant' or role == 'ai':
-                        with self.messages_container:
-                            with ui.element('div').classes('self-start bg-gray-200 p-3 rounded-lg max-w-[80%]'):
-                                ui.label(f"{time_str}").classes('text-xs opacity-70 mb-1')
-                                ui.markdown(content)
-                    else:
-                        with self.messages_container:
-                            with ui.element('div').classes('self-center bg-yellow-100 p-3 rounded-lg max-w-[80%]'):
-                                ui.label(f"{time_str} - Role: {role}").classes('text-xs opacity-70 mb-1')
-                                ui.markdown(content)
-        
-        # Summary dialog
-        @ui.page('/admin/_summary_dialog_container')
-        def summary_dialog_container():
-            self.summary_dialog = ui.dialog()
-            
-            @ui.event('createSummaryDialog')
-            def on_create_summary_dialog(summary_data):
-                self.summary_dialog.clear()
-                with self.summary_dialog, ui.card().classes('w-[50vw] max-w-[75vw]').style('max-width: 75vw !important; max-height: 80vh; overflow-y: auto;'):
-                    with ui.row().classes('w-full bg-primary text-white p-4'):
-                        ui.label(f"Summary Details").classes('text-h6')
-                    with ui.column().classes('p-4'):
-                        ui.label(f"Summary ID: {summary_data.get('summary_id', 'N/A')}")
-                        ui.label(f"User ID: {summary_data.get('user_id', 'N/A')}")
-                        ui.label(f"Session ID: {summary_data.get('session_id', 'N/A')}")
-                        ui.label(f"Created At: {summary_data.get('created_at', 'N/A')}")
-                        ui.label(f"Logged: {'Yes' if summary_data.get('logged') else 'No'}")
-                        ui.label('Summary:').classes('text-h6 mt-4')
-                        with ui.element('div').classes('bg-gray-100 p-4 rounded-lg w-full max-h-[40vh] overflow-y-auto'):
-                            ui.markdown(summary_data.get('summary', ''))
-                    with ui.row().classes('w-full justify-end p-4'):
-                        ui.button('Close', on_click=self.summary_dialog.close).props('flat')
-            
-                self.summary_dialog.open()
-        
-        # Create invisible iframes to load these pages
-        ui.html(f'<iframe src="/admin/_user_dialog_container" style="display:none;"></iframe>')
-        ui.html(f'<iframe src="/admin/_summary_dialog_container" style="display:none;"></iframe>')
-
     def build_ui(self):
         """Builds the NiceGUI elements for the admin page."""
         from nicegui import ui
@@ -811,9 +861,6 @@ class AdminPageManager:
                 ui.tab('Macro Analysis', icon='analytics')
             tabs.set_value('Users Table')
 
-            # Set up dialog listeners for background task UI
-            self.setup_dialog_listeners()
-            
             with ui.tab_panels(tabs, value='Users Table').classes('w-full').props('animated keep-alive'):
                 # --- Users Table Panel --- 
                 with ui.tab_panel('Users Table'):
@@ -851,8 +898,11 @@ class AdminPageManager:
                     # Add row click handler via rowClick event
                     self.users_table.on('rowClick', lambda e: asyncio.create_task(self.handle_users_row_click(e.args[1])))
                     
-                    # Schedule initial load
-                    ui.timer(0.1, lambda: asyncio.create_task(self.initial_load()), once=True)
+                    # Schedule initial load - but only if not already triggered
+                    if not self._load_triggered:
+                        self._load_triggered = True
+                        # Use a short delay to ensure the UI is fully rendered
+                        ui.timer(0.1, lambda: asyncio.create_task(self.initial_load()), once=True)
                 
                 # --- Conversation Summaries Panel --- 
                 with ui.tab_panel('Conversation Summaries'):
@@ -935,10 +985,20 @@ class AdminPageManager:
         <script> /* ... existing script ... */ </script>
         ''') # Keep existing styles/scripts
 
+# Add a global admin_manager variable at the top of the file
+# Add this after your imports
+admin_manager = None
+
+# Modify the page_admin function
 @ui.page('/admin')
 async def page_admin():
-    # Instantiate the manager and build the UI
-    manager = AdminPageManager()
-    manager.build_ui() # This creates the UI and schedules the initial load
-
+    """Admin page handler - creates a singleton manager instance."""
+    global admin_manager
+    
+    # Only create the manager once
+    if admin_manager is None:
+        admin_manager = AdminPageManager()
+        # Build the UI once
+        admin_manager.build_ui()
+    
 # --- No ui.run() ---
