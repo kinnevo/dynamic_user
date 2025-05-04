@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 import asyncio
 
 # Use the specific imports from your snippet
-from utils.layouts import create_navigation_menu_2 #, create_date_range_selector, create_user_selector # Removed unused imports
+from utils.layouts import create_navigation_menu_2, create_date_range_selector, create_user_selector # Re-added imports
 
 # Load environment variables
 load_dotenv()
@@ -178,7 +178,11 @@ class AdminPageManager:
         self.is_loading = False # Manual loading state variable
         self.users_table = None
         self.analysis_container = None
+        self.summaries_container = None
         self.client = None
+        # Common parameters for analysis and summaries
+        self.date_selectors = None
+        self.user_selector = None
         # self.total_users = 0 # No longer needed as separate variable
 
     async def handle_users_row_click(self, e):
@@ -301,13 +305,35 @@ class AdminPageManager:
             ui.label('Fetching and visualizing analysis data...').classes('text-h6 mb-2')
             ui.spinner('dots', size='lg').classes('text-primary')
         tabs_ref.set_value("Macro Analysis")
+        
+        # Extract date range and user selection, if available
+        date_params = {}
+        if self.date_selectors:
+            start_date, start_hour, end_date, end_hour = self.date_selectors
+            date_params = {
+                "start_date": str(start_date.value),  # Ensure it's a string
+                "start_hour": int(start_hour.value),
+                "end_date": str(end_date.value),      # Ensure it's a string
+                "end_hour": int(end_hour.value),
+                "limit": limit
+            }
+            
+        # Add user filter if available and not set to 'all'
+        if self.user_selector and self.user_selector.value and 'all' not in self.user_selector.value:
+            user_ids = [int(uid) for uid in self.user_selector.value if uid.isdigit()]
+            if user_ids:
+                date_params['user_ids'] = user_ids
 
         print(f"\n=== FETCHING VISUALIZATION DATA (limit={limit}) ===")
+        print(f"Date params: {date_params}")
+        
+        # All analysis endpoints now use POST with a request body instead of GET with query parameters
         results = await asyncio.gather(
-            api_request('GET', '/visualizations/topic-heatmap', client=self.client, params={'limit': limit}),
-            api_request('GET', '/visualizations/satisfaction-chart', client=self.client, params={'limit': limit}),
-            api_request('GET', '/visualizations/conversation-types-chart', client=self.client, params={'limit': limit}),
-            api_request('GET', '/visualizations/questions-table', client=self.client, params={'limit': limit, 'top_n': top_n_questions}),
+            # Using new POST endpoints with the date_params as the request body
+            api_request('POST', '/analysis/topic-sentiment', client=self.client, json_data=date_params, params={'limit': limit}),
+            api_request('POST', '/analysis/user-satisfaction', client=self.client, json_data=date_params, params={'limit': limit}),
+            api_request('POST', '/analysis/conversation-types', client=self.client, json_data=date_params, params={'limit': limit}),
+            api_request('POST', '/analysis/top-questions', client=self.client, json_data=date_params, params={'limit': limit, 'top_n': top_n_questions}),
             return_exceptions=True
         )
         
@@ -335,7 +361,12 @@ class AdminPageManager:
             with ui.card().classes('w-full mb-4 p-4'):
                 ui.label('Analysis Parameters').classes('text-h6 mb-2')
                 with ui.row().classes('w-full justify-between'):
-                    ui.label(f'Max Conversations Analyzed: {limit}').classes('text-subtitle1')
+                    with ui.column().classes('mr-4'):
+                        ui.label(f'Max Conversations: {limit}').classes('text-subtitle1')
+                        if date_params:
+                            ui.label(f'Date Range: {date_params["start_date"]} {date_params["start_hour"]}:00 to {date_params["end_date"]} {date_params["end_hour"]}:59').classes('text-subtitle1')
+                        if self.user_selector and self.user_selector.value:
+                            ui.label(f'Users: {", ".join(self.user_selector.value)}').classes('text-subtitle1')
 
             tabs_ref.set_value("Macro Analysis")
 
@@ -425,6 +456,125 @@ class AdminPageManager:
                 ui.button('Run New Analysis', icon='refresh', 
                           on_click=lambda: asyncio.create_task(self.generate_macro_analysis(max_summaries_input, tabs_ref))).props('color=primary')
 
+    async def generate_summaries(self, max_summaries_input, tabs_ref):
+        """Handles the summary generation based on date range and user selection."""
+        if not self.summaries_container: return
+        
+        tabs_ref.set_value("Conversation Summaries")
+        
+        limit = int(max_summaries_input.value)
+        self.summaries_container.clear()
+
+        with self.summaries_container:
+            ui.label('Fetching summaries...').classes('text-h6 mb-2')
+            ui.spinner('dots', size='lg').classes('text-primary')
+        
+        # Extract date range and user selection
+        start_date, start_hour, end_date, end_hour = self.date_selectors
+        user_ids = self.user_selector.value if self.user_selector.value else ['all']
+        
+        # Create the request body - Make sure all fields are properly typed
+        request_data = {
+            "start_date": str(start_date.value),  # Ensure it's a string
+            "start_hour": int(start_hour.value),
+            "end_date": str(end_date.value),      # Ensure it's a string
+            "end_hour": int(end_hour.value),
+            "limit": limit
+        }
+        
+        # Only include user_ids if specific users are selected (not 'all')
+        if 'all' not in user_ids:
+            request_data["user_ids"] = [int(uid) for uid in user_ids if uid.isdigit()]
+        
+        print(f"Request data: {request_data}")
+        
+        # First generate the summaries using the new batch-generate endpoint
+        generate_result = await api_request('POST', '/summaries/generate-batch', client=self.client, json_data=request_data)
+        
+        if generate_result:
+            ui.notify(f"Generated {len(generate_result)} summaries", type='positive')
+            
+            # Now fetch the generated summaries
+            summaries_data = await api_request('POST', '/summaries/by-date-range', client=self.client, json_data=request_data)
+        else:
+            ui.notify("Failed to generate summaries", type='negative')
+            summaries_data = None
+        
+        self.summaries_container.clear()
+        
+        with self.summaries_container:
+            ui.label('Conversation Summaries').classes('text-h5 mb-4')
+            
+            # Display metadata about the query
+            with ui.card().classes('w-full mb-4 p-4'):
+                ui.label('Query Parameters').classes('text-h6 mb-2')
+                with ui.row().classes('w-full justify-between'):
+                    with ui.column().classes('mr-4'):
+                        ui.label(f'Date Range: {start_date.value} {int(start_hour.value)}:00 to {end_date.value} {int(end_hour.value)}:59').classes('text-subtitle1')
+                        ui.label(f'Users: {", ".join(user_ids)}').classes('text-subtitle1')
+                        ui.label(f'Max Summaries: {limit}').classes('text-subtitle1')
+                    
+                    with ui.row():
+                        ui.button('Refresh Summaries', icon='refresh', 
+                                on_click=lambda: asyncio.create_task(self.generate_summaries(max_summaries_input, tabs_ref))).props('color=primary')
+            
+            if summaries_data and isinstance(summaries_data, list):
+                # Create table columns
+                columns = [
+                    {'name': 'summary_id', 'field': 'summary_id', 'label': 'ID', 'align': 'left'},
+                    {'name': 'user_id', 'field': 'user_id', 'label': 'User ID', 'align': 'left'},
+                    {'name': 'session_id', 'field': 'session_id', 'label': 'Session ID', 'align': 'left'},
+                    {'name': 'created_at', 'field': 'created_at', 'label': 'Created At', 'align': 'left'},
+                    {'name': 'logged', 'field': 'logged', 'label': 'Logged User', 'align': 'center'},
+                    {'name': 'summary', 'field': 'summary', 'label': 'Summary', 'align': 'left'},
+                ]
+                
+                # Format the data for the table
+                rows = []
+                for summary in summaries_data:
+                    # Format timestamp
+                    created_at = summary.get('created_at', '')
+                    try:
+                        dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                        formatted_time = dt.strftime("%Y-%m-%d %H:%M:%S")
+                    except (ValueError, AttributeError):
+                        formatted_time = created_at
+                    
+                    # Format logged status
+                    logged = 'Yes' if summary.get('logged') else 'No'
+                    
+                    # Add to rows
+                    rows.append({
+                        'summary_id': summary.get('summary_id', ''),
+                        'user_id': summary.get('user_id', ''),
+                        'session_id': summary.get('session_id', ''),
+                        'created_at': formatted_time,
+                        'logged': logged,
+                        'summary': summary.get('summary', '')[:100] + '...' if len(summary.get('summary', '')) > 100 else summary.get('summary', '')
+                    })
+                
+                ui.label(f'Found {len(rows)} summaries').classes('text-h6 mt-4 mb-2')
+                
+                # Create the table with the data
+                summaries_table = ui.table(
+                    columns=columns,
+                    rows=rows,
+                    row_key='summary_id'
+                ).classes('w-full')
+                
+                # Enable expanding rows to see full summary
+                summaries_table.props('flat bordered separator=cell')
+                
+                # Show success notification
+                if self.client and self.client.has_socket_connection:
+                    js_command = f"Quasar.plugins.Notify.create({{ message: 'Successfully loaded {len(rows)} summaries', type: 'positive', timeout: 3000 }})"
+                    self.client.run_javascript(js_command)
+            else:
+                ui.label('No summaries found for the specified criteria.').classes('text-h6 mt-4 text-center')
+                if self.client and self.client.has_socket_connection:
+                    js_command = "Quasar.plugins.Notify.create({ message: 'No summaries found for the specified criteria', type: 'warning', timeout: 3000 })"
+                    self.client.run_javascript(js_command)
+
     def build_ui(self):
         """Builds the NiceGUI elements for the admin page."""
         from nicegui import ui
@@ -438,6 +588,7 @@ class AdminPageManager:
 
             with ui.tabs().classes('w-full').props('no-swipe-select keep-alive active-class="bg-primary text-white"') as tabs:
                 ui.tab('Users Table', icon='people')
+                ui.tab('Conversation Summaries', icon='summarize') # New tab for summaries
                 ui.tab('Macro Analysis', icon='analytics')
             tabs.set_value('Users Table')
 
@@ -479,27 +630,65 @@ class AdminPageManager:
                     
                     # Schedule initial load
                     ui.timer(0.1, lambda: asyncio.create_task(self.initial_load()), once=True)
+                
+                # --- Conversation Summaries Panel --- 
+                with ui.tab_panel('Conversation Summaries'):
+                    with ui.column().classes('w-full p-4'):
+                        ui.label('Conversation Summaries').classes('text-h5 q-mb-md')
+                        
+                        # Add options panel inside this tab
+                        with ui.card().classes('w-full mb-4 p-4'):
+                            ui.label('Summary Options').classes('text-h6 mb-2')
+                            
+                            # Create date range selector
+                            self.date_selectors = create_date_range_selector()
+                            
+                            # Create user selector
+                            self.user_selector, refresh_users_func = create_user_selector()
+                            
+                            # Create max summaries input
+                            with ui.row().classes('w-full mt-2 items-center'):
+                                max_summaries_input = ui.number(value=100, min=10, max=1000, label='Max Items').classes('w-40')
+                                max_summaries_input.props('outlined')
+                                
+                                ui.button('Refresh Users', icon='refresh', on_click=refresh_users_func).props('flat color=primary q-ml-md')
+                        
+                        # Action buttons for summaries
+                        with ui.row().classes('w-full justify-end mb-4'):
+                            analyze_btn = ui.button('Generate Summaries', icon='summarize', 
+                                                   on_click=lambda: asyncio.create_task(self.generate_summaries(max_summaries_input, tabs)))
+                            analyze_btn.props('color=primary size=lg')
+                        
+                        # Define the summaries container and store reference in class
+                        self.summaries_container = ui.column().classes('w-full mt-4 border rounded p-4 min-h-[500px]')
+                        with self.summaries_container:
+                            ui.label('Click "Generate Summaries" to fetch conversation summaries based on the selected criteria').classes('text-gray-500 italic text-center w-full py-8')
 
                 # --- Macro Analysis Panel --- 
                 with ui.tab_panel('Macro Analysis'):
                     with ui.column().classes('w-full p-4'):
                         ui.label('Conversation Macro Analysis').classes('text-h5 q-mb-md')
-                        with ui.row().classes('w-full mt-4 items-center'):
-                            ui.label('Analysis Options:').classes('mr-4')
-                            with ui.card().classes('w-full p-4'):
-                                with ui.row().classes('items-center justify-between w-full'): # Ensure row takes full width
-                                    max_summaries_input_el = ui.number(value=100, min=10, max=1000, label='Max Conversations').classes('w-40')
-                                    max_summaries_input_el.props('outlined')
-                                    
-                                    # Lambda for analyze button
-                                    analyze_btn = ui.button('Generate Analysis', icon='analytics', 
-                                                            on_click=lambda: asyncio.create_task(self.generate_macro_analysis(max_summaries_input_el, tabs)))
-                                analyze_btn.props('color=primary size=lg')
+                        
+                        # Same options panel for this tab
+                        with ui.card().classes('w-full mb-4 p-4'):
+                            ui.label('Analysis Options').classes('text-h6 mb-2')
+                            
+                            # Reuse the same date selector and user selector components
+                            # No need to recreate them, they're already stored in self.date_selectors and self.user_selector
+                            
+                            # Create max analysis input (reusing the same max_summaries_input)
+                            ui.label(f'Using the date range, user selection, and max items ({max_summaries_input.value}) from the Summaries tab').classes('text-subtitle1 q-mb-sm')
+                        
+                        # Action buttons for analysis
+                        with ui.row().classes('w-full justify-end mb-4'):
+                            analyze_btn = ui.button('Generate Analysis', icon='analytics', 
+                                                   on_click=lambda: asyncio.create_task(self.generate_macro_analysis(max_summaries_input, tabs)))
+                            analyze_btn.props('color=primary size=lg')
                     
                         # Define the analysis container and store reference in class
                         self.analysis_container = ui.column().classes('w-full mt-4 border rounded p-4 min-h-[500px]')
                         with self.analysis_container:
-                            ui.label('Select options and click "Generate Analysis"').classes('text-gray-500 italic text-center w-full py-8')
+                            ui.label('Click "Generate Analysis" to create visualizations based on the selected criteria').classes('text-gray-500 italic text-center w-full py-8')
                         
                     with ui.expansion('How to use Macro Analysis', icon='help').classes('w-full mt-4'):
                         ui.markdown("""
