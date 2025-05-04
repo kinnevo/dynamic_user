@@ -175,6 +175,7 @@ class AdminPageManager:
     def __init__(self):
         # Initialize pagination with rowsNumber = 0
         self.pagination_state = {'page': 1, 'rowsPerPage': 25, 'rowsNumber': 0, 'sortBy': 'user_id', 'descending': False}
+        self.is_loading = False # Manual loading state variable
         self.users_table = None
         self.analysis_container = None
         self.client = None
@@ -212,7 +213,7 @@ class AdminPageManager:
         }
 
         # --- Set loading to true before request ---
-        self.users_table.props('loading=true')
+        self.is_loading = True # Set manual loading state
 
         # Fetch data from the new paginated endpoint
         # !!! UPDATE '/users/paginated' if the final endpoint path is different !!!
@@ -263,7 +264,7 @@ class AdminPageManager:
             self.pagination_state.update(new_pagination)
 
         # --- Set loading to false after request (success or failure) ---
-        self.users_table.props('loading=false')
+        self.is_loading = False # Set manual loading state
 
     async def handle_request_event(self, event_args):
         """Handles the Quasar table's @request event for server-side pagination."""
@@ -447,6 +448,10 @@ class AdminPageManager:
                         ui.label('Click row for details').classes('text-sm text-gray-600')
                         ui.button('Refresh', icon='refresh', on_click=lambda: asyncio.create_task(self.initial_load())).props('flat color=primary')
 
+                    # Manual spinner for loading state
+                    self.loading_spinner = ui.spinner('dots', size='lg').classes('text-primary absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50')
+                    self.loading_spinner.bind_visibility_from(self, 'is_loading')
+
                     users_columns = [
                          {'name': 'user_id', 'field': 'user_id', 'label': 'User ID', 'align': 'left', 'sortable': True}, # Enable sorting if API supports it
                          {'name': 'session_id', 'field': 'session_id', 'label': 'Session ID', 'align': 'left', 'sortable': False},
@@ -466,6 +471,7 @@ class AdminPageManager:
                     # Ensure sortable columns work with the @request event
                     self.users_table.props('flat bordered separator=cell pagination=@request="onRequest"')
                     self.users_table.on('request', lambda e: asyncio.create_task(self.handle_request_event(e)))
+                    self.users_table.props('loading=false') # Ensure built-in loading is off
                     
                     # Schedule initial load
                     ui.timer(0.1, lambda: asyncio.create_task(self.initial_load()), once=True)
