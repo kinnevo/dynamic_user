@@ -28,43 +28,66 @@ if not API_KEY:
 API_HEADERS = {"X-API-Key": API_KEY}
 
 # --- Helper Function for API Calls ---
-async def api_request(method: str, endpoint: str, params: dict = None, json_data: dict = None) -> dict | None:
-    """Makes an asynchronous API request."""
+async def api_request(method: str, endpoint: str, client=None, params: dict = None, json_data: dict = None) -> dict | None:
+    """Makes an asynchronous API request and uses client for notifications if provided."""
     # Explicitly check for API_KEY before making the call
     if not API_KEY:
          print("Aborting API call: FI_ANALYTICS_API_KEY is missing or empty in environment.")
-         ui.notify("API Key is missing. Cannot fetch data.", type='negative')
+         # Use client JS if available
+         if client and client.has_socket_connection:
+             js_command = "Quasar.plugins.Notify.create({ message: 'API Key is missing. Cannot fetch data.', type: 'negative' })"
+             client.run_javascript(js_command)
+         else: # Fallback if no client
+             try: ui.notify("API Key is missing. Cannot fetch data.", type='negative')
+             except Exception: pass # Avoid error if notify fails here too
          return None
          
-    # Recreate headers here to ensure the key is included if it was loaded
+    # Recreate headers here
     headers = {"X-API-Key": API_KEY}
     
-    async with httpx.AsyncClient(base_url=API_BASE_URL, headers=headers, timeout=30.0) as client:
+    async with httpx.AsyncClient(base_url=API_BASE_URL, headers=headers, timeout=30.0) as http_client:
         try:
-            print(f"--> Making API request: {method} {client.build_request(method, endpoint, params=params, json=json_data).url}") # Log the request URL
-            response = await client.request(method, endpoint, params=params, json=json_data)
+            print(f"--> Making API request: {method} {http_client.build_request(method, endpoint, params=params, json=json_data).url}") # Log the request URL
+            response = await http_client.request(method, endpoint, params=params, json=json_data)
             print(f"<-- Received API response: {response.status_code}") # Log the status code
             response.raise_for_status()  # Raise an exception for bad status codes (4xx or 5xx)
             return response.json()
         except httpx.RequestError as exc:
-            # Log the actual exception details
             print(f"A network error occurred while requesting {exc.request.url!r}: {exc}") 
-            ui.notify(f"Network error contacting API: {exc}", type='negative')
+            # Use client JS if available
+            if client and client.has_socket_connection:
+                js_command = f"Quasar.plugins.Notify.create({{ message: 'Network error contacting API: {str(exc).replace('\'', '\\\'')}', type: 'negative' }})" # Basic escaping
+                client.run_javascript(js_command)
+            else:
+                try: ui.notify(f"Network error contacting API: {exc}", type='negative')
+                except Exception: pass
             return None
         except httpx.HTTPStatusError as exc:
-            # Log the response body for HTTP errors too
             print(f"HTTP error response {exc.response.status_code} while requesting {exc.request.url!r}: {exc.response.text}")
-            ui.notify(f"API Error ({exc.response.status_code}): {exc.response.text[:100]}...", type='negative') # Truncate long error messages
+            # Use client JS if available
+            if client and client.has_socket_connection:
+                error_message = exc.response.text[:100].replace('\'', '\\\'').replace('`', '\\`') # Basic escaping
+                js_command = f"Quasar.plugins.Notify.create({{ message: 'API Error ({exc.response.status_code}): {error_message}...', type: 'negative' }})"
+                client.run_javascript(js_command)
+            else:
+                try: ui.notify(f"API Error ({exc.response.status_code}): {exc.response.text[:100]}...", type='negative')
+                except Exception: pass
             return None
         except Exception as e:
             import traceback
             print(f"An unexpected error occurred during API call: {e}")
-            print(traceback.format_exc()) # Print full traceback for unexpected errors
-            ui.notify(f"Unexpected API error: {e}", type='negative')
+            print(traceback.format_exc())
+            # Use client JS if available
+            if client and client.has_socket_connection:
+                js_command = f"Quasar.plugins.Notify.create({{ message: 'Unexpected API error: {str(e).replace('\'', '\\\'')}', type: 'negative' }})" # Basic escaping
+                client.run_javascript(js_command)
+            else:
+                try: ui.notify(f"Unexpected API error: {e}", type='negative')
+                except Exception: pass
             return None
 
 # --- Dialog Handler Function ---
-async def show_user_details(user_data):
+async def show_user_details(user_data, client=None):
     """Creates and shows a dialog with user details and conversation history."""
     # Extract user data
     if isinstance(user_data, dict):
@@ -102,7 +125,7 @@ async def show_user_details(user_data):
     dialog.open()
 
     # Fetch messages asynchronously after opening the dialog
-    messages_data = await api_request('GET', f'/sessions/{session_id}/recent-messages', params={'limit': 20})
+    messages_data = await api_request('GET', f'/sessions/{session_id}/recent-messages', client=client, params={'limit': 20})
     
     # Clear loading spinner and populate messages
     messages_container.clear()
@@ -149,34 +172,54 @@ async def show_user_details(user_data):
 # --- Admin Page Manager Class --- 
 class AdminPageManager:
     def __init__(self):
+        # Initialize pagination with rowsNumber = 0
         self.pagination_state = {'page': 1, 'rowsPerPage': 25, 'rowsNumber': 0, 'sortBy': 'user_id', 'descending': False}
-        self.users_table = None  # Will hold the table element
-        self.analysis_container = None # Placeholder for analysis results container
+        self.users_table = None  
+        self.analysis_container = None 
+        self.client = None
+        self.total_users = 0 # Store total user count
 
     async def handle_users_row_click(self, e):
         """Handles row clicks, showing user details."""
         print(f"Row selected: {e}")
         if isinstance(e, dict):  # Check if we got row data
-            await show_user_details(e) # Call the globally defined function
+            await show_user_details(e, client=self.client)
         elif e is None: pass # Handle deselection if needed
-        else: ui.notify("Could not interpret row click event data", type="negative")
+        else: 
+            if self.client and self.client.has_socket_connection:
+                 js_command = "Quasar.plugins.Notify.create({ message: 'Could not interpret row click event data', type: 'negative' })"
+                 self.client.run_javascript(js_command)
+
+    async def fetch_total_users(self):
+        """Fetches the total number of users from the API."""
+        print("--> Fetching total user count...")
+        count_data = await api_request('GET', '/users/count', client=self.client)
+        if count_data is not None and isinstance(count_data, int):
+            self.total_users = count_data
+            self.pagination_state['rowsNumber'] = self.total_users # Update state
+            print(f"<-- Total users: {self.total_users}")
+        else:
+            print("ERROR fetching or parsing total user count.")
+            # Notification is now handled inside api_request if client is passed
+            self.total_users = 0 # Default to 0 on error
+            self.pagination_state['rowsNumber'] = 0
 
     async def get_users_page(self, props):
-        """Fetches a single page of user data from the API based on table state."""
-        if not self.users_table: return # Guard clause
+        """Fetches a single page of user data and updates the table."""
+        if not self.users_table: return
             
-        pagination = props['pagination']
-        page = pagination['page']
-        rows_per_page = pagination['rowsPerPage']
-        # sort_by = pagination.get('sortBy', 'user_id') # API doesn't support sorting yet
-        # descending = pagination.get('descending', False)
+        pagination_in = props['pagination']
+        page = pagination_in['page']
+        rows_per_page = pagination_in['rowsPerPage']
+        # sortBy = pagination_in.get('sortBy') # If API supports sorting
+        # descending = pagination_in.get('descending')
 
         print(f"--> Requesting users page: {page}, rowsPerPage: {rows_per_page}")
         skip = (page - 1) * rows_per_page
         limit = rows_per_page
 
         # Fetch user data for the current page
-        users_page_data = await api_request('GET', '/users/', params={'skip': skip, 'limit': limit})
+        users_page_data = await api_request('GET', '/users/', client=self.client, params={'skip': skip, 'limit': limit})
 
         table_rows = []
         if users_page_data and isinstance(users_page_data, list):
@@ -186,7 +229,7 @@ class AdminPageManager:
                 session_id = user.get('session_id')
                 if session_id:
                     message_count_tasks[session_id] = asyncio.create_task(
-                        api_request('GET', f'/sessions/{session_id}/message-count')
+                        api_request('GET', f'/sessions/{session_id}/message-count', client=self.client)
                     )
             await asyncio.gather(*message_count_tasks.values(), return_exceptions=True)
 
@@ -225,32 +268,53 @@ class AdminPageManager:
                     'last_activity': last_active_str
                 })
 
+            # Update table rows
             self.users_table.rows = table_rows
-            self.pagination_state.update(pagination)
-            # Cannot set rowsNumber accurately without total count from API
-            ui.notify(f"Loaded page {page} ({len(table_rows)} users)", type='positive', position='bottom-right', timeout=1500)
+            
+            # Update table pagination state (including rowsNumber)
+            # Create a new dict to avoid modifying the input 'props' directly if it matters
+            new_pagination = dict(pagination_in)
+            new_pagination['rowsNumber'] = self.total_users # Set the total count
+            self.users_table.pagination = new_pagination # Crucial: Update table component
+            self.pagination_state.update(new_pagination) # Keep internal state sync
+
+            # Send notification
+            if self.client and self.client.has_socket_connection:
+                js_command = f"Quasar.plugins.Notify.create({{ message: 'Loaded page {page} ({len(table_rows)} users)', type: 'positive', position: 'bottom-right', timeout: 1500 }})"
+                self.client.run_javascript(js_command)
         else:
             self.users_table.rows = []
-            self.pagination_state.update(pagination)
-            ui.notify('Error loading users page or no users found.', type='warning', position='top-right')
+            # Also update pagination state on error to reflect 0 rows for this attempt
+            new_pagination = dict(pagination_in)
+            new_pagination['rowsNumber'] = self.total_users # Keep total count if known
+            self.users_table.pagination = new_pagination
+            self.pagination_state.update(new_pagination)
+            
+            if self.client and self.client.has_socket_connection:
+                js_command = f"Quasar.plugins.Notify.create({{ message: 'Error loading users page or no users found.', type: 'warning', position: 'top-right' }})"
+                self.client.run_javascript(js_command)
 
-        self.users_table.update()
+        # No self.users_table.update() needed as assigning to .rows and .pagination triggers updates
 
     async def handle_request_event(self, event_args):
-        """Handles the Quasar table's @request event."""
-        if event_args and 'args' in event_args and event_args['args']:
-            request_props = event_args['args'][0]
-            if 'pagination' in request_props:
+        """Handles the Quasar table's @request event for server-side pagination."""
+        # Access event arguments using event_args.args
+        if event_args and hasattr(event_args, 'args') and event_args.args:
+            request_props = event_args.args[0] # Quasar sends args in a list
+            if isinstance(request_props, dict) and 'pagination' in request_props:
                 print(f"Handling @request event with props: {request_props}")
-                await self.get_users_page({'pagination': dict(request_props['pagination'])})
+                # Pass the entire request_props, which contains the requested pagination state
+                await self.get_users_page(request_props) 
             else:
-                print("WARN: @request event without pagination data.")
+                print(f"WARN: @request event with unexpected props format: {request_props}")
         else:
-            print("WARN: @request event with unexpected arguments.")
+            print("WARN: @request event with missing or invalid arguments.")
 
     async def initial_load(self):
-        """Performs the initial data load for the first page."""
-        await self.get_users_page({'pagination': self.pagination_state})
+        """Performs the initial data load: fetch total count then first page."""
+        await self.fetch_total_users() # Fetch total count first
+        # Pass the current pagination state for the initial load
+        await self.get_users_page({'pagination': self.pagination_state}) 
         
     async def generate_macro_analysis(self, max_summaries_input, tabs_ref): # Pass UI elements if needed
         """Handles the macro analysis generation."""
@@ -270,10 +334,10 @@ class AdminPageManager:
 
         print(f"\n=== FETCHING VISUALIZATION DATA (limit={limit}) ===")
         results = await asyncio.gather(
-            api_request('GET', '/visualizations/topic-heatmap', params={'limit': limit}),
-            api_request('GET', '/visualizations/satisfaction-chart', params={'limit': limit}),
-            api_request('GET', '/visualizations/conversation-types-chart', params={'limit': limit}),
-            api_request('GET', '/visualizations/questions-table', params={'limit': limit, 'top_n': top_n_questions}),
+            api_request('GET', '/visualizations/topic-heatmap', client=self.client, params={'limit': limit}),
+            api_request('GET', '/visualizations/satisfaction-chart', client=self.client, params={'limit': limit}),
+            api_request('GET', '/visualizations/conversation-types-chart', client=self.client, params={'limit': limit}),
+            api_request('GET', '/visualizations/questions-table', client=self.client, params={'limit': limit, 'top_n': top_n_questions}),
             return_exceptions=True
         )
         
@@ -293,7 +357,10 @@ class AdminPageManager:
                 with ui.card().classes('w-full mb-4 p-4 bg-red-100'):
                     ui.label('Errors Fetching Data:').classes('text-h6 text-negative mb-2')
                     for error in errors: ui.label(f"- {error}").classes('text-negative')
-                ui.notify("Some analysis data failed to load.", type="warning")
+                # Use client.run_javascript to trigger notification
+                if self.client and self.client.has_socket_connection:
+                    js_command = f"Quasar.plugins.Notify.create({{ message: 'Some analysis data failed to load.', type: 'warning' }})"
+                    self.client.run_javascript(js_command)
             
             with ui.card().classes('w-full mb-4 p-4'):
                 ui.label('Analysis Parameters').classes('text-h6 mb-2')
@@ -362,7 +429,10 @@ class AdminPageManager:
             except Exception as e: print(f"Error generating questions table: {e}"); ui.label(f'Error: {str(e)}').classes('text-negative')
             
             print("All visualizations complete")
-            ui.notify("Analysis visualization complete!", type="positive", timeout=3000)
+            # Use client.run_javascript to trigger notification
+            if self.client and self.client.has_socket_connection:
+                js_command = f"Quasar.plugins.Notify.create({{ message: 'Analysis visualization complete!', type: 'positive', timeout: 3000 }})"
+                self.client.run_javascript(js_command)
             with ui.row().classes('justify-end mt-4'):
                 # Need to wrap the call in a lambda or partial to pass arguments correctly
                 ui.button('Run New Analysis', icon='refresh', 
@@ -370,6 +440,10 @@ class AdminPageManager:
 
     def build_ui(self):
         """Builds the NiceGUI elements for the admin page."""
+        from nicegui import ui
+        # Store client reference using ui.context.client
+        self.client = ui.context.client # Correctly capture the client context
+        
         create_navigation_menu_2() # Assumes global definition
 
         with ui.column().classes('w-full items-center p-4'):
@@ -385,7 +459,7 @@ class AdminPageManager:
                 with ui.tab_panel('Users Table'):
                     with ui.row().classes('w-full justify-between items-center mb-4'):
                         ui.label('Click row for details').classes('text-sm text-gray-600')
-                        ui.button('Refresh', icon='refresh', on_click=lambda: self.initial_load()).props('flat color=primary')
+                        ui.button('Refresh', icon='refresh', on_click=lambda: asyncio.create_task(self.initial_load())).props('flat color=primary')
 
                     users_columns = [
                          {'name': 'user_id', 'field': 'user_id', 'label': 'User ID', 'align': 'left', 'sortable': False},
@@ -396,19 +470,17 @@ class AdminPageManager:
                          {'name': 'last_activity', 'field': 'last_activity', 'label': 'Last Activity', 'align': 'center', 'sortable': False}
                     ] # Disable sorting as API doesn't support it
 
-                    # Create the table, using lambda functions instead of method references
+                    # Create the table, binding pagination to the class state
                     self.users_table = ui.table(
                         columns=users_columns, rows=[], row_key='user_id',
-                        pagination={'rowsPerPage': 25, 'page': 1}, # Simple dict, not reactive state
-                        on_select=lambda e: asyncio.create_task(self.handle_users_row_click(e)), # Use lambda to wrap method
+                        pagination=self.pagination_state, # Bind to the reactive dict
+                        on_select=lambda e: asyncio.create_task(self.handle_users_row_click(e)),
                     ).classes('w-full')
-                    # Remove .sync from pagination prop, rely on @request event
-                    self.users_table.props('flat bordered separator=cell pagination @request="onRequest"') 
-                    
-                    # Use a JavaScript function to handle the request instead of a method
+                    # Enable server-side pagination via @request event
+                    self.users_table.props('flat bordered separator=cell pagination=@request="onRequest" loading=false') # Added loading=false initially
                     self.users_table.on('request', lambda e: asyncio.create_task(self.handle_request_event(e)))
                     
-                    # Schedule initial load with lambda
+                    # Schedule initial load
                     ui.timer(0.1, lambda: asyncio.create_task(self.initial_load()), once=True)
 
                 # --- Macro Analysis Panel --- 
