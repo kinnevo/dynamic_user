@@ -492,12 +492,18 @@ class AdminPageManager:
         generate_result = await api_request('POST', '/summaries/generate-batch', client=self.client, json_data=request_data)
         
         if generate_result:
-            ui.notify(f"Generated {len(generate_result)} summaries", type='positive')
+            # Use client-based notification instead of ui.notify
+            if self.client and self.client.has_socket_connection:
+                js_command = f"Quasar.plugins.Notify.create({{ message: 'Generated {len(generate_result)} summaries', type: 'positive', timeout: 3000 }})"
+                self.client.run_javascript(js_command)
             
             # Now fetch the generated summaries
             summaries_data = await api_request('POST', '/summaries/by-date-range', client=self.client, json_data=request_data)
         else:
-            ui.notify("Failed to generate summaries", type='negative')
+            # Use client-based notification instead of ui.notify
+            if self.client and self.client.has_socket_connection:
+                js_command = "Quasar.plugins.Notify.create({ message: 'Failed to generate summaries', type: 'negative', timeout: 3000 })"
+                self.client.run_javascript(js_command)
             summaries_data = None
         
         self.summaries_container.clear()
@@ -517,6 +523,114 @@ class AdminPageManager:
                     with ui.row():
                         ui.button('Refresh Summaries', icon='refresh', 
                                 on_click=lambda: asyncio.create_task(self.generate_summaries(max_summaries_input, tabs_ref))).props('color=primary')
+            
+            if summaries_data and isinstance(summaries_data, list):
+                # Create table columns
+                columns = [
+                    {'name': 'summary_id', 'field': 'summary_id', 'label': 'ID', 'align': 'left'},
+                    {'name': 'user_id', 'field': 'user_id', 'label': 'User ID', 'align': 'left'},
+                    {'name': 'session_id', 'field': 'session_id', 'label': 'Session ID', 'align': 'left'},
+                    {'name': 'created_at', 'field': 'created_at', 'label': 'Created At', 'align': 'left'},
+                    {'name': 'logged', 'field': 'logged', 'label': 'Logged User', 'align': 'center'},
+                    {'name': 'summary', 'field': 'summary', 'label': 'Summary', 'align': 'left'},
+                ]
+                
+                # Format the data for the table
+                rows = []
+                for summary in summaries_data:
+                    # Format timestamp
+                    created_at = summary.get('created_at', '')
+                    try:
+                        dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                        formatted_time = dt.strftime("%Y-%m-%d %H:%M:%S")
+                    except (ValueError, AttributeError):
+                        formatted_time = created_at
+                    
+                    # Format logged status
+                    logged = 'Yes' if summary.get('logged') else 'No'
+                    
+                    # Add to rows
+                    rows.append({
+                        'summary_id': summary.get('summary_id', ''),
+                        'user_id': summary.get('user_id', ''),
+                        'session_id': summary.get('session_id', ''),
+                        'created_at': formatted_time,
+                        'logged': logged,
+                        'summary': summary.get('summary', '')[:100] + '...' if len(summary.get('summary', '')) > 100 else summary.get('summary', '')
+                    })
+                
+                ui.label(f'Found {len(rows)} summaries').classes('text-h6 mt-4 mb-2')
+                
+                # Create the table with the data
+                summaries_table = ui.table(
+                    columns=columns,
+                    rows=rows,
+                    row_key='summary_id'
+                ).classes('w-full')
+                
+                # Enable expanding rows to see full summary
+                summaries_table.props('flat bordered separator=cell')
+                
+                # Show success notification
+                if self.client and self.client.has_socket_connection:
+                    js_command = f"Quasar.plugins.Notify.create({{ message: 'Successfully loaded {len(rows)} summaries', type: 'positive', timeout: 3000 }})"
+                    self.client.run_javascript(js_command)
+            else:
+                ui.label('No summaries found for the specified criteria.').classes('text-h6 mt-4 text-center')
+                if self.client and self.client.has_socket_connection:
+                    js_command = "Quasar.plugins.Notify.create({ message: 'No summaries found for the specified criteria', type: 'warning', timeout: 3000 })"
+                    self.client.run_javascript(js_command)
+                    
+    async def show_summaries(self, max_summaries_input, tabs_ref):
+        """Fetches and displays summaries without generating new ones."""
+        if not self.summaries_container: return
+        
+        tabs_ref.set_value("Conversation Summaries")
+        
+        limit = int(max_summaries_input.value)
+        self.summaries_container.clear()
+
+        with self.summaries_container:
+            ui.label('Fetching existing summaries...').classes('text-h6 mb-2')
+            ui.spinner('dots', size='lg').classes('text-primary')
+        
+        # Extract date range and user selection
+        start_date, start_hour, end_date, end_hour = self.date_selectors
+        user_ids = self.user_selector.value if self.user_selector.value else ['all']
+        
+        # Create the request body - Make sure all fields are properly typed
+        request_data = {
+            "start_date": str(start_date.value),  # Ensure it's a string
+            "start_hour": int(start_hour.value),
+            "end_date": str(end_date.value),      # Ensure it's a string
+            "end_hour": int(end_hour.value),
+            "limit": limit
+        }
+        
+        # Only include user_ids if specific users are selected (not 'all')
+        if 'all' not in user_ids:
+            request_data["user_ids"] = [int(uid) for uid in user_ids if uid.isdigit()]
+        
+        # Fetch existing summaries without generating new ones
+        summaries_data = await api_request('POST', '/summaries/by-date-range', client=self.client, json_data=request_data)
+        
+        self.summaries_container.clear()
+        
+        with self.summaries_container:
+            ui.label('Conversation Summaries').classes('text-h5 mb-4')
+            
+            # Display metadata about the query
+            with ui.card().classes('w-full mb-4 p-4'):
+                ui.label('Query Parameters').classes('text-h6 mb-2')
+                with ui.row().classes('w-full justify-between'):
+                    with ui.column().classes('mr-4'):
+                        ui.label(f'Date Range: {start_date.value} {int(start_hour.value)}:00 to {end_date.value} {int(end_hour.value)}:59').classes('text-subtitle1')
+                        ui.label(f'Users: {", ".join(user_ids)}').classes('text-subtitle1')
+                        ui.label(f'Max Summaries: {limit}').classes('text-subtitle1')
+                    
+                    with ui.row():
+                        ui.button('Refresh', icon='refresh', 
+                                on_click=lambda: asyncio.create_task(self.show_summaries(max_summaries_input, tabs_ref))).props('color=primary flat size="sm"')
             
             if summaries_data and isinstance(summaries_data, list):
                 # Create table columns
@@ -597,7 +711,7 @@ class AdminPageManager:
                 with ui.tab_panel('Users Table'):
                     with ui.row().classes('w-full justify-between items-center mb-4'):
                         ui.label('Click row for details').classes('text-sm text-gray-600')
-                        ui.button('Refresh', icon='refresh', on_click=lambda: asyncio.create_task(self.initial_load())).props('flat color=primary')
+                        ui.button('Refresh', icon='refresh', on_click=lambda: asyncio.create_task(self.initial_load())).props('flat color=primary size="sm"')
 
                     # Full-screen semi-transparent overlay
                     self.loading_overlay = ui.element('div').classes('fixed inset-0 bg-black/50 z-[999]') # Use z-[999] for high z-index
@@ -651,18 +765,24 @@ class AdminPageManager:
                                 max_summaries_input = ui.number(value=100, min=10, max=1000, label='Max Items').classes('w-40')
                                 max_summaries_input.props('outlined')
                                 
-                                ui.button('Refresh Users', icon='refresh', on_click=refresh_users_func).props('flat color=primary q-ml-md')
+                                ui.button('Refresh Users', icon='refresh', on_click=refresh_users_func).props('flat color=primary q-ml-md size="sm"')
                         
-                        # Action buttons for summaries
-                        with ui.row().classes('w-full justify-end mb-4'):
-                            analyze_btn = ui.button('Generate Summaries', icon='summarize', 
+                        # Action buttons for summaries - separate buttons for showing and generating
+                        with ui.row().classes('w-full justify-end mb-4 gap-2'):
+                            # Show summaries button - just fetches existing summaries
+                            show_btn = ui.button('Show Summaries', icon='visibility', 
+                                              on_click=lambda: asyncio.create_task(self.show_summaries(max_summaries_input, tabs)))
+                            show_btn.props('color=primary size="sm"')
+                            
+                            # Generate summaries button - creates new summaries
+                            generate_btn = ui.button('Generate Summaries', icon='summarize', 
                                                    on_click=lambda: asyncio.create_task(self.generate_summaries(max_summaries_input, tabs)))
-                            analyze_btn.props('color=primary size=lg')
+                            generate_btn.props('color=secondary size="sm"')
                         
                         # Define the summaries container and store reference in class
                         self.summaries_container = ui.column().classes('w-full mt-4 border rounded p-4 min-h-[500px]')
                         with self.summaries_container:
-                            ui.label('Click "Generate Summaries" to fetch conversation summaries based on the selected criteria').classes('text-gray-500 italic text-center w-full py-8')
+                            ui.label('Use "Show Summaries" to view existing summaries or "Generate Summaries" to create new ones').classes('text-gray-500 italic text-center w-full py-8')
 
                 # --- Macro Analysis Panel --- 
                 with ui.tab_panel('Macro Analysis'):
@@ -683,7 +803,7 @@ class AdminPageManager:
                         with ui.row().classes('w-full justify-end mb-4'):
                             analyze_btn = ui.button('Generate Analysis', icon='analytics', 
                                                    on_click=lambda: asyncio.create_task(self.generate_macro_analysis(max_summaries_input, tabs)))
-                            analyze_btn.props('color=primary size=lg')
+                            analyze_btn.props('color=primary size="sm"')
                     
                         # Define the analysis container and store reference in class
                         self.analysis_container = ui.column().classes('w-full mt-4 border rounded p-4 min-h-[500px]')
