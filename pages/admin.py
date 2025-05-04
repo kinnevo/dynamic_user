@@ -173,11 +173,12 @@ async def show_user_details(user_data, client=None):
 # --- Admin Page Manager Class --- 
 class AdminPageManager:
     def __init__(self):
-        # Initialize pagination with rowsNumber = 0 (will be updated after fetch)
+        # Initialize pagination with rowsNumber = 0
         self.pagination_state = {'page': 1, 'rowsPerPage': 25, 'rowsNumber': 0, 'sortBy': 'user_id', 'descending': False}
         self.users_table = None  
         self.analysis_container = None 
         self.client = None
+        # self.total_users = 0 # No longer needed as separate variable
 
     async def handle_users_row_click(self, e):
         """Handles row clicks, showing user details."""
@@ -190,26 +191,39 @@ class AdminPageManager:
                  js_command = "Quasar.plugins.Notify.create({ message: 'Could not interpret row click event data', type: 'negative' })"
                  self.client.run_javascript(js_command)
 
-    async def get_users_page(self, props=None): # props is not strictly needed anymore, but keep for compatibility if called differently
-        """Fetches ALL user data from the API endpoint and updates the table for client-side pagination."""
+    async def get_users_page(self, props):
+        """Fetches a single page of user data using the new paginated endpoint."""
         if not self.users_table: return
             
-        print(f"--> Requesting ALL users from paginated endpoint...")
-        # Fetch data from the endpoint. No skip/limit needed as it returns all.
+        pagination_in = props['pagination']
+        page = pagination_in['page']
+        rows_per_page = pagination_in['rowsPerPage']
+        sort_by = pagination_in.get('sortBy', 'user_id')
+        descending = pagination_in.get('descending', False)
+
+        print(f"--> Requesting paginated users: page={page}, limit={rows_per_page}, sort_by={sort_by}, descending={descending}")
+        skip = (page - 1) * rows_per_page
+        
+        api_params = {
+            'skip': skip,
+            'limit': rows_per_page,
+            'sort_by': sort_by,
+            'descending': descending
+        }
+
+        # Fetch data from the new paginated endpoint
         # !!! UPDATE '/users/paginated' if the final endpoint path is different !!!
-        response_data = await api_request('GET', '/users/paginated', client=self.client) # Remove params for skip/limit
+        response_data = await api_request('GET', '/users/paginated', client=self.client, params=api_params)
 
         table_rows = []
         total_users = 0
 
         if response_data and isinstance(response_data, dict) and 'users' in response_data and 'total_users' in response_data:
-            users_data = response_data['users'] # Get all users from the response
+            users_page_data = response_data['users']
             total_users = response_data['total_users']
-            print(f"<-- Received {len(users_data)} users (total: {total_users})")
+            print(f"<-- Received {len(users_page_data)} users (total: {total_users})")
 
-            # Process all received users
-            for user in users_data:
-                # Format last_active safely
+            for user in users_page_data:
                 last_active_str = 'Never'
                 raw_last_active = user.get('last_active')
                 if raw_last_active:
@@ -222,54 +236,54 @@ class AdminPageManager:
                     'user_id': user.get('user_id'),
                     'session_id': user.get('session_id'),
                     'logged': 'Yes' if user.get('logged', False) else 'No',
-                    'message_count': user.get('message_count', 0), # Get message_count directly
-                    'start_time': 'Never', # Still default or get from API if available
+                    'message_count': user.get('message_count', 0),
+                    'start_time': 'Never', 
                     'last_activity': last_active_str
                 })
             
-            # Update table rows - provide ALL rows to the table
             self.users_table.rows = table_rows
             
-            # Update table pagination state - crucial for client-side pagination controls
-            # Set rowsNumber to the total count received from the API
-            # Keep the current page and rowsPerPage settings.
-            current_pagination = self.users_table.pagination # Get the current state from the table component
-            new_pagination = dict(current_pagination) # Create a mutable copy
-            new_pagination['rowsNumber'] = total_users # Set the total count
-            # Ensure current page is valid if total_users is less than (page-1)*rowsPerPage
-            if total_users > 0 and new_pagination['page'] > (total_users + new_pagination['rowsPerPage'] - 1) // new_pagination['rowsPerPage']: # Calculate max page and check
-                 new_pagination['page'] = 1 # Reset to first page if current page is out of bounds
-                 if self.client and self.client.has_socket_connection:
-                     js_command = "Quasar.plugins.Notify.create({ message: 'Page out of bounds, resetting to page 1.', type: 'warning', position: 'bottom' })"
-                     self.client.run_javascript(js_command)
-
+            new_pagination = dict(pagination_in)
+            new_pagination['rowsNumber'] = total_users
             self.users_table.pagination = new_pagination 
-            self.pagination_state.update(new_pagination) # Keep internal state sync
+            self.pagination_state.update(new_pagination) 
 
-            # Send notification
             if self.client and self.client.has_socket_connection:
-                 js_command = f"Quasar.plugins.Notify.create({{ message: 'Loaded {len(table_rows)} of {total_users} users.', type: 'positive', position: 'bottom-right', timeout: 1500 }})"
-                 self.client.run_javascript(js_command)
+                js_command = f"Quasar.plugins.Notify.create({{ message: 'Loaded page {page} ({len(table_rows)} of {total_users} users)', type: 'positive', position: 'bottom-right', timeout: 1500 }})"
+                self.client.run_javascript(js_command)
         else:
-            print("ERROR: Invalid response format from users endpoint or API error.")
+            print("ERROR: Invalid response format from paginated users endpoint or API error.")
             self.users_table.rows = []
-            # Reset pagination on error
-            self.users_table.pagination = {'page': 1, 'rowsPerPage': 25, 'rowsNumber': 0}
-            self.pagination_state.update(self.users_table.pagination)
+            new_pagination = dict(pagination_in)
+            new_pagination['rowsNumber'] = total_users # Use 0 if fetch failed
+            self.users_table.pagination = new_pagination
+            self.pagination_state.update(new_pagination)
             
-            # Notification handled by api_request now
+    async def handle_request_event(self, event_args):
+        """Handles the Quasar table's @request event for server-side pagination."""
+        # Access event arguments correctly: event_args.args should be the dictionary
+        if event_args and hasattr(event_args, 'args') and isinstance(event_args.args, dict):
+            request_props = event_args.args # Correctly access the dictionary
+            if 'pagination' in request_props:
+                print(f"Handling @request event with props: {request_props}")
+                # Pass the entire request_props, which contains the requested pagination state
+                await self.get_users_page(request_props) 
+            else:
+                print(f"WARN: @request event with unexpected props format: {request_props}")
+        else:
+            print("WARN: @request event with missing, invalid arguments, or args not a dict.")
 
     async def initial_load(self):
-        """Performs the initial data load by fetching all users."""
+        """Performs the initial data load using the new paginated endpoint."""
+        # REMOVE call to self.fetch_total_users()
+        # Call get_users_page directly with the initial state
         print("Performing initial user load...")
-        # Call get_users_page to fetch all data
-        await self.get_users_page()
+        await self.get_users_page({'pagination': self.pagination_state}) 
         
-    async def generate_macro_analysis(self, max_summaries_input, tabs_ref): # Pass UI elements if needed
+    async def generate_macro_analysis(self, max_summaries_input, tabs_ref):
         """Handles the macro analysis generation."""
         if not self.analysis_container: return
         
-        # Force the tab to stay on Macro Analysis
         tabs_ref.set_value("Macro Analysis")
         
         limit = int(max_summaries_input.value)
@@ -305,8 +319,8 @@ class AdminPageManager:
             if errors:
                 with ui.card().classes('w-full mb-4 p-4 bg-red-100'):
                     ui.label('Errors Fetching Data:').classes('text-h6 text-negative mb-2')
-                    for error in errors: ui.label(f"- {error}").classes('text-negative')
-                # Use client.run_javascript to trigger notification
+                    for error in errors:
+                        ui.label(f"- {error}").classes('text-negative')
                 if self.client and self.client.has_socket_connection:
                     js_command = f"Quasar.plugins.Notify.create({{ message: 'Some analysis data failed to load.', type: 'warning' }})"
                     self.client.run_javascript(js_command)
@@ -315,6 +329,7 @@ class AdminPageManager:
                 ui.label('Analysis Parameters').classes('text-h6 mb-2')
                 with ui.row().classes('w-full justify-between'):
                     ui.label(f'Max Conversations Analyzed: {limit}').classes('text-subtitle1')
+
             tabs_ref.set_value("Macro Analysis")
 
             print("\n=== GENERATING VISUALIZATIONS FROM API DATA ===")
@@ -333,8 +348,12 @@ class AdminPageManager:
                         fig.update_layout(title='Topic Sentiment Heatmap (Counts)', xaxis_title="Sentiment", yaxis_title="Topic", autosize=True, margin=dict(l=100, r=50, t=80, b=50), height=500)
                         ui.plotly(fig).classes('w-full').props('responsive=true').style('height: 500px; max-width: 100%; overflow: visible;')
                 else:
-                    with ui.card().classes('w-full mb-4 p-4'): ui.label('Topic Sentiment Analysis').classes('text-h6 mb-2'); ui.label('Data not available.').classes('text-gray-500 italic')
-            except Exception as e: print(f"Error generating topic heatmap: {e}"); ui.label(f'Error: {str(e)}').classes('text-negative')
+                    with ui.card().classes('w-full mb-4 p-4'):
+                        ui.label('Topic Sentiment Analysis').classes('text-h6 mb-2')
+                        ui.label('Data not available.').classes('text-gray-500 italic')
+            except Exception as e:
+                print(f"Error generating topic heatmap: {e}")
+                ui.label(f'Error: {str(e)}').classes('text-negative')
             # Satisfaction / Types Charts
             with ui.row().classes('w-full flex flex-col md:flex-row gap-4 my-4'):
                 try:
@@ -345,8 +364,12 @@ class AdminPageManager:
                             fig_satisfaction.update_layout(title='User Satisfaction Distribution', xaxis_title="Satisfaction Level (1-5)", yaxis_title="Number of Conversations", autosize=True, margin=dict(l=30, r=30, t=50, b=50), height=350)
                             ui.plotly(fig_satisfaction).classes('w-full').props('responsive=true').style('height: 350px; max-width: 100%; overflow: visible;')
                     else: 
-                        with ui.card().classes('w-full md:w-1/2 p-4'): ui.label('User Satisfaction').classes('text-h6 mb-2'); ui.label('Data not available.').classes('text-gray-500 italic')
-                except Exception as e: print(f"Error generating satisfaction chart: {e}"); ui.label(f'Error: {str(e)}').classes('text-negative')
+                        with ui.card().classes('w-full md:w-1/2 p-4'):
+                            ui.label('User Satisfaction').classes('text-h6 mb-2')
+                            ui.label('Data not available.').classes('text-gray-500 italic')
+                except Exception as e:
+                    print(f"Error generating satisfaction chart: {e}")
+                    ui.label(f'Error: {str(e)}').classes('text-negative')
                 try:
                     if types_chart_data:
                         with ui.card().classes('w-full md:w-1/2 p-4'):
@@ -355,8 +378,12 @@ class AdminPageManager:
                             fig_types.update_layout(title='Distribution of Conversation Types', autosize=True, margin=dict(l=30, r=30, t=50, b=50), height=350, legend_title_text='Types')
                             ui.plotly(fig_types).classes('w-full').props('responsive=true').style('height: 350px; max-width: 100%; overflow: visible;')
                     else: 
-                        with ui.card().classes('w-full md:w-1/2 p-4'): ui.label('Conversation Types').classes('text-h6 mb-2'); ui.label('Data not available.').classes('text-gray-500 italic')
-                except Exception as e: print(f"Error generating types chart: {e}"); ui.label(f'Error: {str(e)}').classes('text-negative')
+                        with ui.card().classes('w-full md:w-1/2 p-4'):
+                            ui.label('Conversation Types').classes('text-h6 mb-2')
+                            ui.label('Data not available.').classes('text-gray-500 italic')
+                except Exception as e:
+                    print(f"Error generating types chart: {e}")
+                    ui.label(f'Error: {str(e)}').classes('text-negative')
             # Questions Table
             try:
                 if questions_table_data:
@@ -374,18 +401,22 @@ class AdminPageManager:
                         fig_table.update_layout(autosize=True, margin=dict(l=10, r=10, t=50, b=10), height=550)
                         ui.plotly(fig_table).classes('w-full').props('responsive=true').style('height: auto; min-height: 550px; max-width: 100%; overflow: visible;')
                 else: 
-                    with ui.card().classes('w-full mb-4 p-4'): ui.label('Top User Questions').classes('text-h6 mb-2'); ui.label('Data not available.').classes('text-gray-500 italic')
-            except Exception as e: print(f"Error generating questions table: {e}"); ui.label(f'Error: {str(e)}').classes('text-negative')
+                    with ui.card().classes('w-full mb-4 p-4'):
+                        ui.label('Top User Questions').classes('text-h6 mb-2')
+                        ui.label('Data not available.').classes('text-gray-500 italic')
+            except Exception as e:
+                print(f"Error generating questions table: {e}")
+                ui.label(f'Error: {str(e)}').classes('text-negative')
             
             print("All visualizations complete")
-            # Use client.run_javascript to trigger notification
             if self.client and self.client.has_socket_connection:
                 js_command = f"Quasar.plugins.Notify.create({{ message: 'Analysis visualization complete!', type: 'positive', timeout: 3000 }})"
                 self.client.run_javascript(js_command)
+
             with ui.row().classes('justify-end mt-4'):
                 # Need to wrap the call in a lambda or partial to pass arguments correctly
                 ui.button('Run New Analysis', icon='refresh', 
-                          on_click=lambda: self.generate_macro_analysis(max_summaries_input, tabs_ref)).props('color=primary')
+                          on_click=lambda: asyncio.create_task(self.generate_macro_analysis(max_summaries_input, tabs_ref))).props('color=primary')
 
     def build_ui(self):
         """Builds the NiceGUI elements for the admin page."""
@@ -408,7 +439,6 @@ class AdminPageManager:
                 with ui.tab_panel('Users Table'):
                     with ui.row().classes('w-full justify-between items-center mb-4'):
                         ui.label('Click row for details').classes('text-sm text-gray-600')
-                        # Refresh button triggers initial_load again
                         ui.button('Refresh', icon='refresh', on_click=lambda: asyncio.create_task(self.initial_load())).props('flat color=primary')
 
                     users_columns = [
@@ -426,10 +456,10 @@ class AdminPageManager:
                         pagination=self.pagination_state, # Bind to the reactive dict
                         on_select=lambda e: asyncio.create_task(self.handle_users_row_click(e)),
                     ).classes('w-full')
-                    # REMOVE server-side pagination props and event handler
-                    # The table will handle pagination and sorting client-side with all data
-                    self.users_table.props('flat bordered separator=cell loading=false') 
-                    # REMOVE self.users_table.on('request', ...) call
+                    # Enable server-side pagination via @request event
+                    # Ensure sortable columns work with the @request event
+                    self.users_table.props('flat bordered separator=cell pagination=@request="onRequest" loading=false') 
+                    self.users_table.on('request', lambda e: asyncio.create_task(self.handle_request_event(e)))
                     
                     # Schedule initial load
                     ui.timer(0.1, lambda: asyncio.create_task(self.initial_load()), once=True)
