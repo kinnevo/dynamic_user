@@ -1043,20 +1043,12 @@ class AdminPageManager:
         <script> /* ... existing script ... */ </script>
         ''') # Keep existing styles/scripts
 
-# Add a global admin_manager variable at the top of the file
-# Add this after your imports
-admin_manager = None
-
-# Modify the page_admin function
 @ui.page('/admin')
 async def page_admin():
-    """Admin page handler - creates a singleton manager instance."""
-    global admin_manager
-    
-    # Only create the manager once
-    if admin_manager is None:
-        admin_manager = AdminPageManager()
-        # Build the UI once
-        admin_manager.build_ui()
+    """Admin page handler - creates a new manager instance for each session."""
+    # Create a new manager instance for this session
+    admin_manager = AdminPageManager()
+    # Build the UI
+    admin_manager.build_ui()
     
 # --- No ui.run() ---
