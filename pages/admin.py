@@ -101,7 +101,7 @@ async def show_user_details(user_data, client=None):
     # Create a placeholder element to avoid the UI context issue
     placeholder_id = f"user_modal_{user_id}"
     
-    # Create modal using JavaScript
+    # Create modal using JavaScript with improved width and layout
     js_code = f"""
     // Create modal container if it doesn't exist
     let modalContainer = document.getElementById("{placeholder_id}");
@@ -112,20 +112,20 @@ async def show_user_details(user_data, client=None):
             'flex', 'items-center', 'justify-center', 'z-50');
         modalContainer.style.display = 'flex';
         
-        // Create modal content
+        // Create modal content - increased width
         let modalContent = document.createElement('div');
-        modalContent.classList.add('bg-white', 'rounded-lg', 'shadow-xl', 'w-1/2', 
-            'max-w-2xl', 'max-h-[80vh]', 'overflow-y-auto', 'flex', 'flex-col');
+        modalContent.classList.add('bg-white', 'rounded-lg', 'shadow-xl', 'w-3/5', 
+            'max-w-3xl', 'max-h-[90vh]', 'overflow-y-auto', 'flex', 'flex-col');
         
         // Header
         let header = document.createElement('div');
-        header.classList.add('bg-primary', 'text-white', 'p-4', 'flex', 'justify-between', 'items-center');
+        header.classList.add('bg-primary', 'text-white', 'p-4', 'flex', 'justify-between', 'items-center', 'sticky', 'top-0', 'z-10', 'w-full');
         let title = document.createElement('h3');
-        title.textContent = "Details for User: {user_id}";
-        title.classList.add('text-lg', 'font-bold');
+        title.textContent = "Details for User: " + {user_id};
+        title.classList.add('text-lg', 'font-bold', 'flex-grow');
         let closeBtn = document.createElement('button');
         closeBtn.textContent = "×";
-        closeBtn.classList.add('text-xl', 'font-bold');
+        closeBtn.classList.add('text-xl', 'font-bold', 'ml-4');
         closeBtn.onclick = function() {{
             document.body.removeChild(modalContainer);
         }};
@@ -134,29 +134,29 @@ async def show_user_details(user_data, client=None):
         
         // User details section
         let details = document.createElement('div');
-        details.classList.add('p-4');
+        details.classList.add('p-4', 'w-full');
         details.innerHTML = `
-            <p class="mb-2">User ID: {user_id}</p>
-            <p class="mb-2">Session ID: {session_id}</p>
-            <p class="mb-2">Logged Status: {logged}</p>
+            <p class="mb-2"><strong>User ID:</strong> {user_id}</p>
+            <p class="mb-2"><strong>Session ID:</strong> {session_id}</p>
+            <p class="mb-2"><strong>Logged Status:</strong> {logged}</p>
         `;
         
         // Messages section
         let messagesHeader = document.createElement('h4');
         messagesHeader.textContent = 'Recent Conversation';
-        messagesHeader.classList.add('font-bold', 'p-4', 'pt-0');
+        messagesHeader.classList.add('font-bold', 'p-4', 'pt-0', 'text-lg');
         
         let messagesContainer = document.createElement('div');
         messagesContainer.id = "messages_{user_id}";
-        messagesContainer.classList.add('w-full', 'h-[40vh]', 'overflow-y-auto', 'p-4', 
-            'gap-2', 'border', 'rounded', 'mx-4', 'bg-white', 'mb-4');
+        messagesContainer.classList.add('w-auto', 'mx-4', 'h-[40vh]', 'overflow-y-auto', 'p-4', 
+            'gap-2', 'border', 'rounded', 'bg-white', 'mb-4', 'overflow-x-hidden');
         
         // Loading spinner
         messagesContainer.innerHTML = '<div class="flex justify-center items-center h-full"><div class="spinner-border text-primary" role="status"></div></div>';
         
         // Footer
         let footer = document.createElement('div');
-        footer.classList.add('p-4', 'flex', 'justify-end');
+        footer.classList.add('p-4', 'flex', 'justify-end', 'sticky', 'bottom-0', 'bg-white', 'border-t', 'w-full');
         let closeButton = document.createElement('button');
         closeButton.textContent = "Close";
         closeButton.classList.add('px-4', 'py-2', 'bg-primary', 'text-white', 'rounded');
@@ -186,12 +186,12 @@ async def show_user_details(user_data, client=None):
     messages_html = ""
     if messages_data and isinstance(messages_data, list):
         if not messages_data:
-            messages_html = '<p class="text-gray-500 italic">No messages found for this session</p>'
+            messages_html = '<p class="text-gray-500 italic text-center w-full">No messages found for this session</p>'
         else:
             messages_data.sort(key=lambda x: x.get('timestamp', ''))
             for msg in messages_data:
                 role = msg.get('role')
-                content = msg.get('content')
+                content = msg.get('content', '').replace('`', '\\`').replace("'", "\\'").replace('\n', '<br>')
                 timestamp_str = msg.get('timestamp')
                 
                 # Parse timestamp safely
@@ -203,22 +203,25 @@ async def show_user_details(user_data, client=None):
                 
                 # Create HTML for message bubble based on role
                 bubble_class = "self-end bg-blue-500 text-white" if role == 'user' else "self-start bg-gray-200"
+                justify_class = "justify-end" if role == 'user' else "justify-start"
+                
                 if role not in ['user', 'assistant', 'ai']:
                     bubble_class = "self-center bg-yellow-100"
+                    justify_class = "justify-center"
                     content = f"Role: {role}<br>{content}"
                 
                 messages_html += f"""
-                <div class="flex {'justify-end' if role == 'user' else 'justify-start'} mb-4">
-                    <div class="p-3 rounded-lg max-w-[80%] {bubble_class}">
+                <div class="flex {justify_class} mb-4 w-full">
+                    <div class="p-3 rounded-lg max-w-[80%] break-words {bubble_class}">
                         <div class="text-xs opacity-70 mb-1">{time_str}</div>
-                        <div>{content}</div>
+                        <div class="whitespace-pre-wrap">{content}</div>
                     </div>
                 </div>
                 """
     elif messages_data is None:
-        messages_html = '<p class="text-red-500">Error fetching messages. Check API connection.</p>'
+        messages_html = '<p class="text-red-500 text-center w-full">Error fetching messages. Check API connection.</p>'
     else:
-        messages_html = '<p class="text-orange-500">Unexpected data format received for messages.</p>'
+        messages_html = '<p class="text-orange-500 text-center w-full">Unexpected data format received for messages.</p>'
     
     # Update messages container with fetched data
     update_js = f"""
