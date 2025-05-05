@@ -151,8 +151,14 @@ async def show_user_details(user_data, client=None):
         messagesContainer.classList.add('w-auto', 'mx-4', 'h-[40vh]', 'overflow-y-auto', 'p-4', 
             'gap-2', 'border', 'rounded', 'bg-white', 'mb-4', 'overflow-x-hidden');
         
-        // Loading spinner
-        messagesContainer.innerHTML = '<div class="flex justify-center items-center h-full"><div class="spinner-border text-primary" role="status"></div></div>';
+        // Enhanced loading spinner
+        messagesContainer.innerHTML = `
+            <div class="flex flex-col justify-center items-center h-full">
+                <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mb-3"></div>
+                <p class="text-gray-600 font-medium">Loading conversation history...</p>
+                <p class="text-gray-500 text-sm mt-1">This may take a moment</p>
+            </div>
+        `;
         
         // Footer
         let footer = document.createElement('div');
@@ -178,6 +184,22 @@ async def show_user_details(user_data, client=None):
     """
     
     await client.run_javascript(js_code)
+    
+    # Add a loading state indicator before updating messages
+    update_js = f"""
+    let messagesContainer = document.getElementById("messages_{user_id}");
+    if (messagesContainer) {{
+        // Show loading spinner first
+        messagesContainer.innerHTML = `
+            <div class="flex flex-col justify-center items-center h-full">
+                <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mb-3"></div>
+                <p class="text-gray-600 font-medium">Loading conversation history...</p>
+                <p class="text-gray-500 text-sm mt-1">This may take a moment</p>
+            </div>
+        `;
+    }}
+    """
+    await client.run_javascript(update_js)
     
     # Fetch messages asynchronously
     messages_data = await api_request('GET', f'/sessions/{session_id}/recent-messages', client=client, params={'limit': 20})
