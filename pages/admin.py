@@ -235,16 +235,29 @@ async def show_summary_details(summary_data, client=None):
     if not isinstance(summary_data, dict) or not client or not client.has_socket_connection:
         return
     
+    # Extract the summary ID to fetch the complete data if needed
     summary_id = summary_data.get('summary_id', 'unknown')
+    
+    # Check if we need to fetch the full summary - if the summary key contains "..." it's likely truncated
+    if '...' in summary_data.get('summary', '') and summary_id:
+        # Fetch the complete summary data from the API
+        full_summary_data = await api_request('GET', f'/summaries/{summary_id}', client=client)
+        if full_summary_data and isinstance(full_summary_data, dict):
+            # Replace our data with the complete version
+            summary_data = full_summary_data
+    
+    # Now extract all needed fields
     user_id = summary_data.get('user_id', 'N/A')
     session_id = summary_data.get('session_id', 'N/A')
     created_at = summary_data.get('created_at', 'N/A')
     logged = 'Yes' if summary_data.get('logged') else 'No'
+    
+    # Make sure we're using the full summary text without truncation
     summary_text = summary_data.get('summary', '').replace('`', '\\`').replace("'", "\\'").replace('\n', '<br>')
     
     placeholder_id = f"summary_modal_{summary_id}"
     
-    # Create modal using JavaScript
+    # Create modal using JavaScript - use a slightly larger and better-styled modal
     js_code = f"""
     // Create modal container if it doesn't exist
     let modalContainer = document.getElementById("{placeholder_id}");
@@ -255,14 +268,14 @@ async def show_summary_details(summary_data, client=None):
             'flex', 'items-center', 'justify-center', 'z-50');
         modalContainer.style.display = 'flex';
         
-        // Create modal content
+        // Create modal content - increased size
         let modalContent = document.createElement('div');
-        modalContent.classList.add('bg-white', 'rounded-lg', 'shadow-xl', 'w-1/2', 
-            'max-w-2xl', 'max-h-[80vh]', 'overflow-y-auto', 'flex', 'flex-col');
+        modalContent.classList.add('bg-white', 'rounded-lg', 'shadow-xl', 'w-3/5', 
+            'max-w-3xl', 'max-h-[90vh]', 'overflow-y-auto', 'flex', 'flex-col');
         
         // Header
         let header = document.createElement('div');
-        header.classList.add('bg-primary', 'text-white', 'p-4', 'flex', 'justify-between', 'items-center');
+        header.classList.add('bg-primary', 'text-white', 'p-4', 'flex', 'justify-between', 'items-center', 'sticky', 'top-0', 'z-10');
         let title = document.createElement('h3');
         title.textContent = "Summary Details";
         title.classList.add('text-lg', 'font-bold');
@@ -279,20 +292,20 @@ async def show_summary_details(summary_data, client=None):
         let details = document.createElement('div');
         details.classList.add('p-4');
         details.innerHTML = `
-            <p class="mb-2">Summary ID: {summary_id}</p>
-            <p class="mb-2">User ID: {user_id}</p>
-            <p class="mb-2">Session ID: {session_id}</p>
-            <p class="mb-2">Created At: {created_at}</p>
-            <p class="mb-2">Logged: {logged}</p>
-            <h4 class="font-bold mt-4 mb-2">Summary:</h4>
-            <div class="bg-gray-100 p-4 rounded-lg w-full max-h-[40vh] overflow-y-auto">
+            <p class="mb-2"><strong>Summary ID:</strong> {summary_id}</p>
+            <p class="mb-2"><strong>User ID:</strong> {user_id}</p>
+            <p class="mb-2"><strong>Session ID:</strong> {session_id}</p>
+            <p class="mb-2"><strong>Created At:</strong> {created_at}</p>
+            <p class="mb-2"><strong>Logged:</strong> {logged}</p>
+            <h4 class="font-bold mt-6 mb-3 text-lg">Summary:</h4>
+            <div class="bg-gray-100 p-6 rounded-lg w-full min-h-[350px] overflow-y-auto whitespace-pre-wrap text-base leading-relaxed">
                 {summary_text}
             </div>
         `;
         
         // Footer
         let footer = document.createElement('div');
-        footer.classList.add('p-4', 'flex', 'justify-end');
+        footer.classList.add('p-4', 'flex', 'justify-end', 'sticky', 'bottom-0', 'bg-white', 'border-t');
         let closeButton = document.createElement('button');
         closeButton.textContent = "Close";
         closeButton.classList.add('px-4', 'py-2', 'bg-primary', 'text-white', 'rounded');
@@ -706,6 +719,9 @@ class AdminPageManager:
                     # Format logged status
                     logged = 'Yes' if summary.get('logged') else 'No'
                     
+                    # Get the full summary text
+                    full_summary = summary.get('summary', '')
+                    
                     # Add to rows
                     rows.append({
                         'summary_id': summary.get('summary_id', ''),
@@ -713,7 +729,8 @@ class AdminPageManager:
                         'session_id': summary.get('session_id', ''),
                         'created_at': formatted_time,
                         'logged': logged,
-                        'summary': summary.get('summary', '')[:100] + '...' if len(summary.get('summary', '')) > 100 else summary.get('summary', '')
+                        'summary': full_summary[:100] + '...' if len(full_summary) > 100 else full_summary,
+                        'original_summary': full_summary  # Store the full text
                     })
                 
                 ui.label(f'Found {len(rows)} summaries').classes('text-h6 mt-4 mb-2')
@@ -807,6 +824,9 @@ class AdminPageManager:
                     # Format logged status
                     logged = 'Yes' if summary.get('logged') else 'No'
                     
+                    # Get the full summary text
+                    full_summary = summary.get('summary', '')
+                    
                     # Add to rows
                     rows.append({
                         'summary_id': summary.get('summary_id', ''),
@@ -814,7 +834,8 @@ class AdminPageManager:
                         'session_id': summary.get('session_id', ''),
                         'created_at': formatted_time,
                         'logged': logged,
-                        'summary': summary.get('summary', '')[:100] + '...' if len(summary.get('summary', '')) > 100 else summary.get('summary', '')
+                        'summary': full_summary[:100] + '...' if len(full_summary) > 100 else full_summary,
+                        'original_summary': full_summary  # Store the full text
                     })
                 
                 ui.label(f'Found {len(rows)} summaries').classes('text-h6 mt-4 mb-2')
@@ -834,9 +855,21 @@ class AdminPageManager:
 
     def show_summaries_table(self, columns, rows):
         """Helper to create the summaries table with row click handler."""
+        # Create a deep copy of the rows with full summary text
+        full_rows = []
+        for row in rows:
+            full_row = row.copy()
+            # Store the untruncated summary in the data if needed
+            if 'summary' in row and '...' in row['summary']:
+                # Keep the full summary in an attribute but display the truncated version
+                original_summary = row.get('original_summary', '')
+                if original_summary:
+                    full_row['full_summary'] = original_summary
+            full_rows.append(full_row)
+        
         table = ui.table(
             columns=columns,
-            rows=rows,
+            rows=full_rows,
             row_key='summary_id',
         ).classes('w-full')
         table.props('flat bordered separator=cell')
