@@ -17,8 +17,8 @@ from utils.layouts import create_navigation_menu_2, create_date_range_selector, 
 load_dotenv()
 
 # # API Configuration
-API_BASE_URL = "https://fireportes-production.up.railway.app/api/v1"
-# API_BASE_URL = "http://localhost:8000/api/v1/"  # for local development
+# API_BASE_URL = "https://fireportes-production.up.railway.app/api/v1"
+API_BASE_URL = "http://localhost:8000/api/v1/"  # for local development
 API_KEY = os.getenv("FI_ANALYTICS_API_KEY")
 
 if not API_KEY:
@@ -486,49 +486,114 @@ class AdminPageManager:
             # Make sure to reset the loading state even if there's an error
             self.is_loading = False
 
+    async def _trigger_batch_analysis(self, summaries_data_list: list | None):
+        """Helper to trigger batch analysis generation for a list of summaries."""
+        if not self.summaries_container:
+            print("Summaries container not available for batch analysis status.")
+            return
+
+        if not summaries_data_list or not isinstance(summaries_data_list, list) or not summaries_data_list:
+            print("No summaries data provided or data is empty, skipping batch analysis trigger.")
+            return
+
+        summary_ids = [s.get('summary_id') for s in summaries_data_list if isinstance(s, dict) and s.get('summary_id')]
+
+        if not summary_ids:
+            print("No valid summary IDs found in the provided data to trigger batch analysis.")
+            return
+
+        self.summaries_container.clear()
+        with self.summaries_container:
+            ui.label(f'Initiating analysis generation for {len(summary_ids)} summaries...').classes('text-h6 mb-2 text-center')
+            ui.spinner('dots', size='lg').classes('text-primary self-center my-4')
+        
+        analysis_payload = {'summary_ids': summary_ids}
+        print(f"Calling /analysis/batch-generate with {len(summary_ids)} summary IDs (first 5: {summary_ids[:5]}...).")
+        
+        analysis_initiation_result = await api_request(
+            'POST', 
+            '/analysis/batch-generate', 
+            client=self.client, 
+            json_data=analysis_payload
+        )
+
+        if analysis_initiation_result:
+            if self.client and self.client.has_socket_connection:
+                message = (
+                    f"Analysis generation process initiated for {len(summary_ids)} summaries. "
+                    "Visualizations in 'Macro Analysis' tab should reflect this data shortly."
+                )
+                js_command = f"Quasar.plugins.Notify.create({{ message: '{message}', type: 'positive', timeout: 5000, position: 'bottom' }})"
+                self.client.run_javascript(js_command)
+            print(f"Analysis generation successfully initiated for {len(summary_ids)} summaries.")
+        else:
+            # api_request likely showed its own error for HTTP/network issues
+            if self.client and self.client.has_socket_connection:
+                js_command = f"Quasar.plugins.Notify.create({{ message: 'Failed to initiate batch analysis for summaries. Visualizations may use older data.', type: 'warning', timeout: 5000, position: 'bottom' }})"
+                self.client.run_javascript(js_command)
+            print("Failed to initiate batch analysis for summaries.")
+
+        print("Waiting 3 seconds for analysis processing to begin...")
+        await asyncio.sleep(3) 
+        print("Wait finished. Proceeding to display summaries list if available.")
+        # The calling function will clear self.summaries_container again before drawing the final table.
+
     async def generate_macro_analysis(self, max_summaries_input, tabs_ref):
         """Handles the macro analysis generation."""
         if not self.analysis_container: return
         
         tabs_ref.set_value("Macro Analysis")
         
-        limit = int(max_summaries_input.value)
+        limit_val = int(max_summaries_input.value) # Renamed to avoid conflict with dict key
         top_n_questions = 15
         self.analysis_container.clear()
 
         with self.analysis_container:
             ui.label('Fetching and visualizing analysis data...').classes('text-h6 mb-2')
             ui.spinner('dots', size='lg').classes('text-primary')
-        tabs_ref.set_value("Macro Analysis")
         
-        # Extract date range and user selection, if available
-        date_params = {}
+        # Prepare the request body for visualization endpoints
+        visualization_request_body = {
+            "limit": limit_val # Add limit to the JSON body
+        }
         if self.date_selectors:
             start_date, start_hour, end_date, end_hour = self.date_selectors
-            date_params = {
-                "start_date": str(start_date.value),  # Ensure it's a string
+            visualization_request_body.update({
+                "start_date": str(start_date.value),
                 "start_hour": int(start_hour.value),
-                "end_date": str(end_date.value),      # Ensure it's a string
+                "end_date": str(end_date.value),
                 "end_hour": int(end_hour.value),
-                "limit": limit
-            }
+            })
             
-        # Add user filter if available and not set to 'all'
         if self.user_selector and self.user_selector.value and 'all' not in self.user_selector.value:
             user_ids = [int(uid) for uid in self.user_selector.value if uid.isdigit()]
             if user_ids:
-                date_params['user_ids'] = user_ids
+                visualization_request_body['user_ids'] = user_ids
 
-        print(f"\n=== FETCHING VISUALIZATION DATA (limit={limit}) ===")
-        print(f"Date params: {date_params}")
+        print(f"\n=== FETCHING VISUALIZATION DATA ===")
+        print(f"Request Body (for JSON): {visualization_request_body}")
+        # top_n will be the only query param, for questions-table only
+        print(f"Query Params (for questions-table only): top_n={top_n_questions}") 
         
-        # All analysis endpoints now use POST with a request body instead of GET with query parameters
+        # API calls using new endpoints and parameter structure
+        # Limit is now in the body, top_n is a query param for questions_table
         results = await asyncio.gather(
-            # Using new POST endpoints with the date_params as the request body
-            api_request('POST', '/analysis/topic-sentiment', client=self.client, json_data=date_params, params={'limit': limit}),
-            api_request('POST', '/analysis/user-satisfaction', client=self.client, json_data=date_params, params={'limit': limit}),
-            api_request('POST', '/analysis/conversation-types', client=self.client, json_data=date_params, params={'limit': limit}),
-            api_request('POST', '/analysis/top-questions', client=self.client, json_data=date_params, params={'limit': limit, 'top_n': top_n_questions}),
+            api_request('POST', '/visualizations/topic-heatmap', 
+                        client=self.client, 
+                        json_data=visualization_request_body, 
+                        params=None), # No query params
+            api_request('POST', '/visualizations/satisfaction-chart', 
+                        client=self.client, 
+                        json_data=visualization_request_body, 
+                        params=None), # No query params
+            api_request('POST', '/visualizations/conversation-types-chart',
+                        client=self.client, 
+                        json_data=visualization_request_body, 
+                        params=None), # No query params
+            api_request('POST', '/visualizations/questions-table', 
+                        client=self.client, 
+                        json_data=visualization_request_body, 
+                        params={'top_n': top_n_questions}), # Only top_n as query param
             return_exceptions=True
         )
         
@@ -557,13 +622,23 @@ class AdminPageManager:
                 ui.label('Analysis Parameters').classes('text-h6 mb-2')
                 with ui.row().classes('w-full justify-between'):
                     with ui.column().classes('mr-4'):
-                        ui.label(f'Max Conversations: {limit}').classes('text-subtitle1')
-                        if date_params:
-                            ui.label(f'Date Range: {date_params["start_date"]} {date_params["start_hour"]}:00 to {date_params["end_date"]} {date_params["end_hour"]}:59').classes('text-subtitle1')
+                        ui.label(f'Max Conversations (Limit in body): {limit_val}').classes('text-subtitle1')
+                        if "start_date" in visualization_request_body: # Check if date selectors were used
+                            sd = visualization_request_body["start_date"]
+                            sh = visualization_request_body["start_hour"]
+                            ed = visualization_request_body["end_date"]
+                            eh = visualization_request_body["end_hour"]
+                            ui.label(f'Date Range: {sd} {sh:02d}:00 to {ed} {eh:02d}:59').classes('text-subtitle1')
+                        else:
+                            ui.label('Date Range: Not applied (all time)').classes('text-subtitle1')
+                            
                         if self.user_selector and self.user_selector.value:
-                            ui.label(f'Users: {", ".join(self.user_selector.value)}').classes('text-subtitle1')
+                            selected_users = ", ".join(self.user_selector.value)
+                            ui.label(f'Users: {selected_users}').classes('text-subtitle1')
+                        else:
+                            ui.label(f'Users: All').classes('text-subtitle1')
 
-            tabs_ref.set_value("Macro Analysis")
+            # tabs_ref.set_value("Macro Analysis") # Redundant here, already set
 
             print("\n=== GENERATING VISUALIZATIONS FROM API DATA ===")
             # --- Generate Visualizations (using Plotly as before) ---
@@ -661,12 +736,12 @@ class AdminPageManager:
         self.summaries_container.clear()
 
         with self.summaries_container:
-            ui.label('Fetching summaries...').classes('text-h6 mb-2')
-            ui.spinner('dots', size='lg').classes('text-primary')
+            ui.label('Generating and fetching summaries...').classes('text-h6 mb-2 text-center')
+            ui.spinner('dots', size='lg').classes('text-primary self-center my-4')
         
         # Extract date range and user selection
         start_date, start_hour, end_date, end_hour = self.date_selectors
-        user_ids = self.user_selector.value if self.user_selector.value else ['all']
+        user_ids_selection = self.user_selector.value if self.user_selector.value else ['all']
         
         # Create the request body - Make sure all fields are properly typed
         request_data = {
@@ -678,100 +753,103 @@ class AdminPageManager:
         }
         
         # Only include user_ids if specific users are selected (not 'all')
-        if 'all' not in user_ids:
-            request_data["user_ids"] = [int(uid) for uid in user_ids if uid.isdigit()]
+        if 'all' not in user_ids_selection:
+            request_data["user_ids"] = [int(uid) for uid in user_ids_selection if uid.isdigit()]
         
-        print(f"Request data: {request_data}")
-        
-        # First generate the summaries using the new batch-generate endpoint
+        print(f"Requesting summary generation with data: {request_data}")
         generate_result = await api_request('POST', '/summaries/generate-batch', client=self.client, json_data=request_data)
         
+        summaries_data = None # Initialize
         if generate_result:
-            # Use client-based notification instead of ui.notify
             if self.client and self.client.has_socket_connection:
-                js_command = f"Quasar.plugins.Notify.create({{ message: 'Generated {len(generate_result)} summaries', type: 'positive', timeout: 3000 }})"
+                count_msg = f"{len(generate_result)} summaries" if isinstance(generate_result, list) and generate_result else "summaries"
+                js_command = f"Quasar.plugins.Notify.create({{ message: 'Summary generation process completed for {count_msg}. Now fetching...', type: 'info', timeout: 3000, position: 'bottom' }})"
                 self.client.run_javascript(js_command)
             
-            # Now fetch the generated summaries
+            print(f"Fetching summaries after generation, using request data: {request_data}")
+            # Fetch the generated summaries (or all matching if generate_result isn't specific)
             summaries_data = await api_request('POST', '/summaries/by-date-range', client=self.client, json_data=request_data)
         else:
-            # Use client-based notification instead of ui.notify
             if self.client and self.client.has_socket_connection:
-                js_command = "Quasar.plugins.Notify.create({ message: 'Failed to generate summaries', type: 'negative', timeout: 3000 })"
+                js_command = "Quasar.plugins.Notify.create({ message: 'Failed to trigger summary generation. No new summaries to fetch or analyze.', type: 'negative', timeout: 3000, position: 'bottom' })"
                 self.client.run_javascript(js_command)
-            summaries_data = None
         
-        self.summaries_container.clear()
+        # Trigger batch analysis if summaries were fetched successfully and are not empty
+        if summaries_data and isinstance(summaries_data, list) and summaries_data:
+            await self._trigger_batch_analysis(summaries_data)
+        elif not summaries_data and generate_result: # Generation was attempted but fetching failed or returned empty
+            self.summaries_container.clear() 
+            with self.summaries_container:
+                 ui.label('Summary generation was triggered, but failed to fetch summaries or no summaries were found.').classes('text-h6 mt-4 text-center text-negative')
+        elif not generate_result: # Generation itself failed
+             self.summaries_container.clear() 
+             with self.summaries_container:
+                  ui.label('Summary generation failed. Cannot proceed to fetch or analyze.').classes('text-h6 mt-4 text-center text-negative')
+
+
+        # This clear is crucial to remove any messages from _trigger_batch_analysis
+        # or the initial "Generating and fetching..." message if _trigger_batch_analysis was skipped or failed.
+        self.summaries_container.clear() 
         
         with self.summaries_container:
             ui.label('Conversation Summaries').classes('text-h5 mb-4')
             
-            # Display metadata about the query
             with ui.card().classes('w-full mb-4 p-4'):
                 ui.label('Query Parameters').classes('text-h6 mb-2')
                 with ui.row().classes('w-full justify-between'):
                     with ui.column().classes('mr-4'):
                         ui.label(f'Date Range: {start_date.value} {int(start_hour.value)}:00 to {end_date.value} {int(end_hour.value)}:59').classes('text-subtitle1')
-                        ui.label(f'Users: {", ".join(user_ids)}').classes('text-subtitle1')
+                        ui.label(f'Users: {", ".join(user_ids_selection)}').classes('text-subtitle1')
                         ui.label(f'Max Summaries: {limit}').classes('text-subtitle1')
                     
-                    with ui.row():
-                        ui.button('Refresh Summaries', icon='refresh', 
-                                on_click=lambda: asyncio.create_task(self.generate_summaries(max_summaries_input, tabs_ref))).props('color=primary')
+                    with ui.row().classes('items-center'): # Group buttons
+                        ui.button('Re-Generate & Show', icon='refresh', 
+                                on_click=lambda: asyncio.create_task(self.generate_summaries(max_summaries_input, tabs_ref))).props('color=secondary flat size="sm"')
+                        ui.button('Show Existing Only', icon='visibility',
+                                  on_click=lambda: asyncio.create_task(self.show_summaries(max_summaries_input, tabs_ref))).props('color=primary flat size="sm" q-ml-sm')
             
-            if summaries_data and isinstance(summaries_data, list):
-                # Create table columns
+            if summaries_data and isinstance(summaries_data, list) and summaries_data:
                 columns = [
                     {'name': 'summary_id', 'field': 'summary_id', 'label': 'ID', 'align': 'left'},
                     {'name': 'user_id', 'field': 'user_id', 'label': 'User ID', 'align': 'left'},
                     {'name': 'session_id', 'field': 'session_id', 'label': 'Session ID', 'align': 'left'},
                     {'name': 'created_at', 'field': 'created_at', 'label': 'Created At', 'align': 'left'},
                     {'name': 'logged', 'field': 'logged', 'label': 'Logged User', 'align': 'center'},
-                    {'name': 'summary', 'field': 'summary', 'label': 'Summary', 'align': 'left'},
+                    {'name': 'summary', 'field': 'summary', 'label': 'Summary (Preview)', 'align': 'left'},
                 ]
                 
-                # Format the data for the table
                 rows = []
-                for summary in summaries_data:
-                    # Format timestamp
-                    created_at = summary.get('created_at', '')
+                for summary_item in summaries_data:
+                    if not isinstance(summary_item, dict): continue 
+                    created_at_raw = summary_item.get('created_at', '')
                     try:
-                        dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-                        formatted_time = dt.strftime("%Y-%m-%d %H:%M:%S")
+                        dt = datetime.fromisoformat(created_at_raw.replace('Z', '+00:00')) if created_at_raw else None
+                        formatted_time = dt.strftime("%Y-%m-%d %H:%M:%S") if dt else 'N/A'
                     except (ValueError, AttributeError):
-                        formatted_time = created_at
+                        formatted_time = created_at_raw or 'N/A'
                     
-                    # Format logged status
-                    logged = 'Yes' if summary.get('logged') else 'No'
+                    logged = 'Yes' if summary_item.get('logged') else 'No'
+                    full_summary_text = summary_item.get('summary', '')
                     
-                    # Get the full summary text
-                    full_summary = summary.get('summary', '')
-                    
-                    # Add to rows
                     rows.append({
-                        'summary_id': summary.get('summary_id', ''),
-                        'user_id': summary.get('user_id', ''),
-                        'session_id': summary.get('session_id', ''),
+                        'summary_id': summary_item.get('summary_id', 'N/A'),
+                        'user_id': summary_item.get('user_id', 'N/A'),
+                        'session_id': summary_item.get('session_id', 'N/A'),
                         'created_at': formatted_time,
                         'logged': logged,
-                        'summary': full_summary[:100] + '...' if len(full_summary) > 100 else full_summary,
-                        'original_summary': full_summary  # Store the full text
+                        'summary': full_summary_text[:100] + '...' if len(full_summary_text) > 100 else full_summary_text,
+                        'original_summary': full_summary_text
                     })
                 
-                ui.label(f'Found {len(rows)} summaries').classes('text-h6 mt-4 mb-2')
+                ui.label(f'Displaying {len(rows)} summaries.').classes('text-h6 mt-4 mb-2')
+                self.show_summaries_table(columns, rows) # Reuses the table rendering method
                 
-                # Create the table with the data
-                summaries_table = self.show_summaries_table(columns, rows)
-                
-                # Show success notification
                 if self.client and self.client.has_socket_connection:
-                    js_command = f"Quasar.plugins.Notify.create({{ message: 'Successfully loaded {len(rows)} summaries', type: 'positive', timeout: 3000 }})"
+                    js_command = f"Quasar.plugins.Notify.create({{ message: 'Successfully loaded and displayed {len(rows)} summaries.', type: 'positive', timeout: 3000, position: 'bottom' }})"
                     self.client.run_javascript(js_command)
-            else:
-                ui.label('No summaries found for the specified criteria.').classes('text-h6 mt-4 text-center')
-                if self.client and self.client.has_socket_connection:
-                    js_command = "Quasar.plugins.Notify.create({ message: 'No summaries found for the specified criteria', type: 'warning', timeout: 3000 })"
-                    self.client.run_javascript(js_command)
+            elif summaries_data and isinstance(summaries_data, list) and not summaries_data:
+                 ui.label('No summaries found for the specified criteria after generation attempt.').classes('text-h6 mt-4 text-center')
+            # If summaries_data is None, specific error messages were shown before this block.
                     
     async def show_summaries(self, max_summaries_input, tabs_ref):
         """Fetches and displays summaries without generating new ones."""
@@ -783,48 +861,50 @@ class AdminPageManager:
         self.summaries_container.clear()
 
         with self.summaries_container:
-            ui.label('Fetching existing summaries...').classes('text-h6 mb-2')
-            ui.spinner('dots', size='lg').classes('text-primary')
+            ui.label('Fetching existing summaries...').classes('text-h6 mb-2 text-center')
+            ui.spinner('dots', size='lg').classes('text-primary self-center my-4')
         
         # Extract date range and user selection
         start_date, start_hour, end_date, end_hour = self.date_selectors
-        user_ids = self.user_selector.value if self.user_selector.value else ['all']
+        user_ids_selection = self.user_selector.value if self.user_selector.value else ['all']
         
-        # Create the request body - Make sure all fields are properly typed
+        # Create the request body
         request_data = {
-            "start_date": str(start_date.value),  # Ensure it's a string
+            "start_date": str(start_date.value),
             "start_hour": int(start_hour.value),
-            "end_date": str(end_date.value),      # Ensure it's a string
+            "end_date": str(end_date.value),
             "end_hour": int(end_hour.value),
             "limit": limit
         }
         
-        # Only include user_ids if specific users are selected (not 'all')
-        if 'all' not in user_ids:
-            request_data["user_ids"] = [int(uid) for uid in user_ids if uid.isdigit()]
+        if 'all' not in user_ids_selection:
+            request_data["user_ids"] = [int(uid) for uid in user_ids_selection if uid.isdigit()]
         
-        # Fetch existing summaries without generating new ones
+        print(f"Fetching existing summaries with request data: {request_data}")
         summaries_data = await api_request('POST', '/summaries/by-date-range', client=self.client, json_data=request_data)
         
+        # This clear is crucial to remove the initial "Fetching existing..." message 
+        # or handle cases where fetching might have failed before this point.
         self.summaries_container.clear()
         
         with self.summaries_container:
             ui.label('Conversation Summaries').classes('text-h5 mb-4')
             
-            # Display metadata about the query
             with ui.card().classes('w-full mb-4 p-4'):
                 ui.label('Query Parameters').classes('text-h6 mb-2')
                 with ui.row().classes('w-full justify-between'):
                     with ui.column().classes('mr-4'):
                         ui.label(f'Date Range: {start_date.value} {int(start_hour.value)}:00 to {end_date.value} {int(end_hour.value)}:59').classes('text-subtitle1')
-                        ui.label(f'Users: {", ".join(user_ids)}').classes('text-subtitle1')
+                        ui.label(f'Users: {", ".join(user_ids_selection)}').classes('text-subtitle1')
                         ui.label(f'Max Summaries: {limit}').classes('text-subtitle1')
                     
-                    with ui.row():
-                        ui.button('Refresh', icon='refresh', 
+                    with ui.row().classes('items-center'):
+                        ui.button('Refresh View', icon='refresh', 
                                 on_click=lambda: asyncio.create_task(self.show_summaries(max_summaries_input, tabs_ref))).props('color=primary flat size="sm"')
+                        ui.button('Generate & Show New', icon='summarize',
+                                  on_click=lambda: asyncio.create_task(self.generate_summaries(max_summaries_input, tabs_ref))).props('color=secondary flat size="sm" q-ml-sm')
             
-            if summaries_data and isinstance(summaries_data, list):
+            if summaries_data and isinstance(summaries_data, list) and summaries_data:
                 # Create table columns
                 columns = [
                     {'name': 'summary_id', 'field': 'summary_id', 'label': 'ID', 'align': 'left'},
@@ -832,51 +912,43 @@ class AdminPageManager:
                     {'name': 'session_id', 'field': 'session_id', 'label': 'Session ID', 'align': 'left'},
                     {'name': 'created_at', 'field': 'created_at', 'label': 'Created At', 'align': 'left'},
                     {'name': 'logged', 'field': 'logged', 'label': 'Logged User', 'align': 'center'},
-                    {'name': 'summary', 'field': 'summary', 'label': 'Summary', 'align': 'left'},
+                    {'name': 'summary', 'field': 'summary', 'label': 'Summary (Preview)', 'align': 'left'},
                 ]
                 
                 # Format the data for the table
                 rows = []
-                for summary in summaries_data:
-                    # Format timestamp
-                    created_at = summary.get('created_at', '')
+                for summary_item in summaries_data:
+                    if not isinstance(summary_item, dict): continue
+                    created_at_raw = summary_item.get('created_at', '')
                     try:
-                        dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-                        formatted_time = dt.strftime("%Y-%m-%d %H:%M:%S")
+                        dt = datetime.fromisoformat(created_at_raw.replace('Z', '+00:00')) if created_at_raw else None
+                        formatted_time = dt.strftime("%Y-%m-%d %H:%M:%S") if dt else 'N/A'
                     except (ValueError, AttributeError):
-                        formatted_time = created_at
+                        formatted_time = created_at_raw or 'N/A'
                     
-                    # Format logged status
-                    logged = 'Yes' if summary.get('logged') else 'No'
+                    logged = 'Yes' if summary_item.get('logged') else 'No'
+                    full_summary_text = summary_item.get('summary', '')
                     
-                    # Get the full summary text
-                    full_summary = summary.get('summary', '')
-                    
-                    # Add to rows
                     rows.append({
-                        'summary_id': summary.get('summary_id', ''),
-                        'user_id': summary.get('user_id', ''),
-                        'session_id': summary.get('session_id', ''),
+                        'summary_id': summary_item.get('summary_id', 'N/A'),
+                        'user_id': summary_item.get('user_id', 'N/A'),
+                        'session_id': summary_item.get('session_id', 'N/A'),
                         'created_at': formatted_time,
                         'logged': logged,
-                        'summary': full_summary[:100] + '...' if len(full_summary) > 100 else full_summary,
-                        'original_summary': full_summary  # Store the full text
+                        'summary': full_summary_text[:100] + '...' if len(full_summary_text) > 100 else full_summary_text,
+                        'original_summary': full_summary_text 
                     })
                 
-                ui.label(f'Found {len(rows)} summaries').classes('text-h6 mt-4 mb-2')
+                ui.label(f'Displaying {len(rows)} existing summaries.').classes('text-h6 mt-4 mb-2')
+                self.show_summaries_table(columns, rows)
                 
-                # Create the table with the data
-                summaries_table = self.show_summaries_table(columns, rows)
-                
-                # Show success notification
                 if self.client and self.client.has_socket_connection:
-                    js_command = f"Quasar.plugins.Notify.create({{ message: 'Successfully loaded {len(rows)} summaries', type: 'positive', timeout: 3000 }})"
+                    js_command = f"Quasar.plugins.Notify.create({{ message: 'Successfully loaded and displayed {len(rows)} existing summaries.', type: 'positive', timeout: 3000, position: 'bottom' }})"
                     self.client.run_javascript(js_command)
-            else:
-                ui.label('No summaries found for the specified criteria.').classes('text-h6 mt-4 text-center')
-                if self.client and self.client.has_socket_connection:
-                    js_command = "Quasar.plugins.Notify.create({ message: 'No summaries found for the specified criteria', type: 'warning', timeout: 3000 })"
-                    self.client.run_javascript(js_command)
+            elif summaries_data and isinstance(summaries_data, list) and not summaries_data: # Empty list from API
+                ui.label('No existing summaries found for the specified criteria.').classes('text-h6 mt-4 text-center')
+            else: # summaries_data is None (fetch failed)
+                 ui.label('Failed to fetch existing summaries. Please check API connection or logs.').classes('text-h6 mt-4 text-center text-negative')
 
     def show_summaries_table(self, columns, rows):
         """Helper to create the summaries table with row click handler."""
