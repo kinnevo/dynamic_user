@@ -3,6 +3,8 @@ import uuid
 from utils.state import logout, update_user_status, set_user_logout_state
 from utils.database import PostgresAdapter
 from utils.layouts import create_navigation_menu_2
+from utils.firebase_auth import FirebaseAuth
+from utils.auth_middleware import get_user_display_name
 
 # Initialize database adapter
 db_adapter = PostgresAdapter()
@@ -44,9 +46,38 @@ def home():
     # Initialize user visit count - this now checks URL parameters internally
     visit_count = get_visit_count()
     
-    # Optional: If you want to display a small header with user info
-    with ui.row().classes('w-full justify-end p-2'):
+    # Header with user info and authentication controls
+    with ui.row().classes('w-full justify-between items-center p-2'):
+        # Left side: visit count
         ui.label(f'Visitas: {visit_count}').classes('text-sm')
+        
+        # Right side: user info or login button
+        with ui.row().classes('items-center'):
+            user = FirebaseAuth.get_current_user()
+            if user:
+                # User is logged in
+                display_name = get_user_display_name()
+                ui.label(f'Hola, {display_name}').classes('text-sm mr-2')
+                
+                # Logout button
+                logout_btn = ui.button('Cerrar Sesión', icon='logout').props('flat dense').classes('text-sm')
+                
+                # Logout handler
+                def handle_logout():
+                    FirebaseAuth.logout_user()
+                    # Set the logout state flag
+                    set_user_logout_state(True)
+                    # Redirect to login page
+                    ui.navigate.to('/login')
+                
+                logout_btn.on('click', handle_logout)
+            else:
+                # User is not logged in
+                login_btn = ui.button('Iniciar Sesión', icon='login').props('flat dense').classes('text-sm')
+                login_btn.on('click', lambda: ui.navigate.to('/login'))
+                
+                register_btn = ui.button('Registrarse', icon='person_add').props('flat dense').classes('text-sm')
+                register_btn.on('click', lambda: ui.navigate.to('/register'))
     
     with ui.column().classes('w-full items-center'):
         ui.label('Resuelve desafíos reales con FastInnovation').classes('text-h3 q-mb-md')
