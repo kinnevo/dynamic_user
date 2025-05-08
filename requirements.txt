@@ -3,6 +3,8 @@ requests>=2.31.0
 
 # Authentication
 passlib[bcrypt]
+pyrebase4>=4.7.1
+firebase-admin>=6.2.0
 
 # Database
 psycopg2-binary>=2.9.9
