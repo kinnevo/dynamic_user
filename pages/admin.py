@@ -17,8 +17,8 @@ from utils.layouts import create_navigation_menu_2, create_date_range_selector, 
 load_dotenv()
 
 # # API Configuration
-# API_BASE_URL = "https://fireportes-production.up.railway.app/api/v1"
-API_BASE_URL = "http://localhost:8000/api/v1/"  # for local development
+API_BASE_URL = "https://fireportes-production.up.railway.app/api/v1"
+# API_BASE_URL = "http://localhost:8000/api/v1/"  # for local development
 API_KEY = os.getenv("FI_ANALYTICS_API_KEY")
 
 if not API_KEY:
