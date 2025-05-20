@@ -41,6 +41,10 @@ def on_shutdown():
 @ui.page('/')
 def index():
     """Check if user is authenticated and redirect accordingly"""
+    # Initialize user storage for this session if not already done
+    if not hasattr(app.storage, 'user'):
+        app.storage.user = {}
+        
     user = FirebaseAuth.get_current_user()
     if user:
         # User is logged in, redirect to home
@@ -48,14 +52,6 @@ def index():
     else:
         # User is not logged in, redirect to login page
         return ui.navigate.to('/login')
-
-# Initialize user storage at the application level
-@app.on_startup
-def init_user_storage():
-    """Initialize the user storage for Firebase authentication"""
-    # This ensures we have a place to store user data in the session
-    if not hasattr(app.storage, 'user'):
-        app.storage.user = {}
 
 # Use a fixed secret key for development
 secret_key = 'development_secret_key_1234567890'

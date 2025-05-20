@@ -7,6 +7,10 @@ import json
 def login_page():
     """Login page with Firebase authentication"""
     
+    # Initialize user storage if not already done
+    if not hasattr(app.storage, 'user'):
+        app.storage.user = {}
+    
     # Create a container for the login form
     with ui.card().classes('w-96 mx-auto mt-16 p-6'):
         ui.label('Iniciar Sesión').classes('text-h4 mb-4 text-center')

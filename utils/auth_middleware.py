@@ -9,6 +9,10 @@ def auth_required(page_function):
     """
     @wraps(page_function)
     def wrapper(*args, **kwargs):
+        # Ensure user storage is initialized
+        if not hasattr(app.storage, 'user'):
+            app.storage.user = {}
+            
         # Check if user is logged in
         user = FirebaseAuth.get_current_user()
         
@@ -54,6 +58,10 @@ def get_user_display_name():
     Get the display name of the current user
     Returns None if user is not logged in
     """
+    # Ensure user storage is initialized
+    if not hasattr(app.storage, 'user'):
+        app.storage.user = {}
+        
     user = FirebaseAuth.get_current_user()
     if user:
         # Try to get display name from token or user info
