@@ -79,7 +79,7 @@ def login_page():
                     debug_label.text = 'Inicio de sesión exitoso, redirigiendo...'
                     
                     # Redirect to home page after short delay
-                    ui.timer(0.8, lambda: ui.navigate.to('/home'))
+                    ui.timer(1.5, lambda: ui.navigate.to('/home'), once=True)
                 else:
                     # Show error message
                     error_msg = result.get('error', 'Error de inicio de sesión')

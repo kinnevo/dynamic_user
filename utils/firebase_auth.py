@@ -69,14 +69,14 @@ if not api_key:
     print("Please set FIREBASE_API_KEY in your .env file and restart the application.")
 
 # Print Firebase config for debugging (excluding API key for security)
-print("Firebase Config - Checking if configured properly:")
-for key, value in config.items():
-    if key == 'apiKey':
-        # Show only if API key exists, but not the actual key
-        print(f"  {key}: {'[SET]' if value else '[MISSING - Required for user auth]'}")
-    else:
-        # Show if value exists for other config items
-        print(f"  {key}: {'[SET]' if value else '[MISSING]'}")
+# print("Firebase Config - Checking if configured properly:")
+# for key, value in config.items():
+#     if key == 'apiKey':
+#         # Show only if API key exists, but not the actual key
+#         print(f"  {key}: {'[SET]' if value else '[MISSING - Required for user auth]'}")
+#     else:
+#         # Show if value exists for other config items
+#         print(f"  {key}: {'[SET]' if value else '[MISSING]'}")
 
 # Initialize Firebase Admin SDK (for server-side operations)
 service_account_json = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
