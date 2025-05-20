@@ -5,6 +5,7 @@ from utils.database import PostgresAdapter
 from utils.filc_agent_client import FilcAgentClient
 from utils.message_router import MessageRouter
 from utils.firebase_auth import FirebaseAuth
+from utils.auth_middleware import auth_required
 from pages.reportes import reportes_page
 from pages.admin import page_admin
 from pages.chat import chat_page
@@ -36,11 +37,17 @@ def on_shutdown():
     """Application shutdown handler"""
     print("Shutting down...")
 
-# Redirect root to home page
+# Redirect root to authentication check
 @ui.page('/')
 def index():
-    """Redirect to home page"""
-    return ui.navigate.to('/home')
+    """Check if user is authenticated and redirect accordingly"""
+    user = FirebaseAuth.get_current_user()
+    if user:
+        # User is logged in, redirect to home
+        return ui.navigate.to('/home')
+    else:
+        # User is not logged in, redirect to login page
+        return ui.navigate.to('/login')
 
 # Initialize user storage at the application level
 @app.on_startup
