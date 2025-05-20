@@ -100,7 +100,7 @@ def home():
 
 
                 with ui.row().classes('w-full justify-center'):
-                    ui.button('Vamos a resolver desafíos reales ...').classes('text-h6 q-mb-md').on_click(lambda: ui.navigate.to('/login'))
+                    ui.button('Vamos a resolver desafíos reales ...').classes('text-h6 q-mb-md').on_click(lambda: ui.navigate.to('/chat'))
 
             # Right column with image
             with ui.column().classes('w-2/5'):  # Takes up 50% of the width
