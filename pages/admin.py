@@ -9,6 +9,7 @@ import httpx
 import os
 from dotenv import load_dotenv
 import asyncio
+from utils.auth_middleware import auth_required
 
 # Use the specific imports from your snippet
 from utils.layouts import create_navigation_menu_2, create_date_range_selector, create_user_selector # Re-added imports
@@ -1116,6 +1117,7 @@ class AdminPageManager:
         ''') # Keep existing styles/scripts
 
 @ui.page('/admin')
+@auth_required
 async def page_admin():
     """Admin page handler - creates a new manager instance for each session."""
     # Create a new manager instance for this session

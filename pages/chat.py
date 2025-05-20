@@ -4,6 +4,7 @@ from utils.message_router import MessageRouter
 from utils.layouts import create_navigation_menu_2
 from utils.database import PostgresAdapter
 from utils.filc_agent_client import FilcAgentClient
+from utils.auth_middleware import auth_required
 
 # Initialize components
 message_router = MessageRouter()
@@ -11,6 +12,7 @@ db_adapter = PostgresAdapter()
 filc_client = FilcAgentClient()
 
 @ui.page('/chat')
+@auth_required
 async def chat_page():
     """Chat interface for FILC Agent interaction with reliable scrolling"""
     create_navigation_menu_2()

@@ -1,6 +1,7 @@
 from nicegui import ui, app
 from utils.layouts import create_navigation_menu_2
 from utils.database import PostgresAdapter
+from utils.auth_middleware import auth_required
 import plotly.graph_objects as go
 from wordcloud import WordCloud
 import nltk
@@ -14,6 +15,7 @@ except LookupError:
     nltk.download('stopwords')
 
 @ui.page('/reportes')
+@auth_required
 def reportes_page():
     create_navigation_menu_2()
     db_adapter = PostgresAdapter()

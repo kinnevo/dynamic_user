@@ -4,7 +4,7 @@ from utils.state import logout, update_user_status, set_user_logout_state
 from utils.database import PostgresAdapter
 from utils.layouts import create_navigation_menu_2
 from utils.firebase_auth import FirebaseAuth
-from utils.auth_middleware import get_user_display_name
+from utils.auth_middleware import get_user_display_name, auth_required
 
 # Initialize database adapter
 db_adapter = PostgresAdapter()
@@ -42,6 +42,7 @@ def get_visit_count() -> int:
     return app.storage.browser['visits']
 
 @ui.page('/home')
+@auth_required
 def home():
     # Initialize user visit count - this now checks URL parameters internally
     visit_count = get_visit_count()
