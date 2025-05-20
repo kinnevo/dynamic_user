@@ -36,6 +36,12 @@ auth_instance = firebase.auth()
 
 class FirebaseAuth:
     @staticmethod
+    def _ensure_user_storage():
+        """Ensure user storage is initialized"""
+        if not hasattr(app.storage, 'user'):
+            app.storage.user = {}
+
+    @staticmethod
     def register_user(email, password, display_name=None):
         """
         Register a new user with email and password
@@ -70,6 +76,9 @@ class FirebaseAuth:
         """
         Logout the current user
         """
+        # Ensure user storage exists
+        FirebaseAuth._ensure_user_storage()
+        
         # Pyrebase doesn't have a logout method as it's stateless
         # We just clear the session data
         if 'user' in app.storage.user:
@@ -81,6 +90,9 @@ class FirebaseAuth:
         """
         Get the current user from session
         """
+        # Ensure user storage exists
+        FirebaseAuth._ensure_user_storage()
+        
         return app.storage.user.get('user', None)
 
     @staticmethod
