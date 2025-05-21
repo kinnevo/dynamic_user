@@ -6,6 +6,7 @@ from utils.database import PostgresAdapter
 from utils.auth_middleware import auth_required
 from datetime import datetime
 import asyncio
+from typing import Optional # Added for type hinting
 
 # Initialize components
 message_router = MessageRouter()
@@ -17,9 +18,12 @@ async def chat_page():
     """Chat interface with sidebar for managing multiple chat sessions."""
     create_navigation_menu_2()
     
-    # --- Page State ---
-    # chat_messages_list = [] # To hold UI elements for messages if needed for dynamic updates
-    
+    # --- UI Element Variables (defined early for access in helpers) ---
+    messages_container: Optional[ui.column] = None
+    message_input: Optional[ui.input] = None
+    spinner: Optional[ui.spinner] = None
+    chat_list_ui: Optional[ui.column] = None
+
     # --- Helper Functions ---
     def format_timestamp(ts):
         if not ts:
@@ -33,19 +37,25 @@ async def chat_page():
         return ts.strftime("%Y-%m-%d %H:%M")
 
     async def load_and_display_chat_history(chat_id: str):
+        nonlocal messages_container, message_input, spinner # Ensure these are from chat_page scope
+        
+        if not messages_container: return
         messages_container.clear()
+
         if not chat_id:
             with messages_container:
                 ui.label("Select a chat or start a new one.").classes('text-center m-auto')
-            message_input.disable()
+            if message_input: message_input.disable()
             return
 
         app.storage.user['active_chat_id'] = chat_id
         print(f"Loading history for active_chat_id: {chat_id}")
         
-        spinner.visible = True
+        if spinner: spinner.visible = True
         try:
             history = await asyncio.to_thread(db_adapter.get_recent_messages, chat_session_id=chat_id, limit=100)
+            if not messages_container: return 
+            
             if not history:
                 with messages_container:
                     ui.markdown("Bienvenido! Describe tu idea y desarrollemosla juntos.").classes('self-start bg-gray-200 p-3 rounded-lg max-w-[80%]')
@@ -59,17 +69,20 @@ async def chat_page():
                             with ui.element('div').classes('self-start bg-gray-200 p-3 rounded-lg max-w-[80%]'):
                                 ui.markdown(message['content'])
             await scroll_messages_to_bottom()
-            message_input.enable()
+            if message_input: message_input.enable()
         except Exception as e:
             print(f"Error loading chat history for {chat_id}: {e}")
             ui.notify(f"Error al cargar el historial del chat: {e}", type='negative')
-            with messages_container:
-                ui.label(f"Error al cargar el chat {chat_id}.").classes('text-negative')
+            if messages_container:
+                with messages_container:
+                    ui.label(f"Error al cargar el chat {chat_id}.").classes('text-negative')
         finally:
-            spinner.visible = False
-        update_chat_list.refresh() # Refresh sidebar to highlight selection
+            if spinner: spinner.visible = False
+        update_chat_list.refresh() # update_chat_list is a refreshable function in scope
 
     async def scroll_messages_to_bottom():
+        nonlocal messages_container
+        if not messages_container: return
         try:
             await ui.run_javascript(f'var el = getElement({messages_container.id}); if (el) el.scrollTop = el.scrollHeight;', timeout=1.0)
         except Exception as e:
@@ -88,11 +101,16 @@ async def chat_page():
 
     # Main chat area
     with ui.column().classes('w-full h-screen p-0 m-0 flex flex-col'): # Occupy full height
-        # Header part (if any, could be part of create_navigation_menu_2 or here)
-        # ui.label("Chat with Agent").classes('text-xl p-4 bg-gray-50') # Example header
-
-        # Messages display area
-        messages_container = ui.column().classes('flex-grow w-full overflow-y-auto p-4 gap-2 border-t border-b')
+        # Use a div with relative positioning to act as a container for messages_container and spinner
+        with ui.element('div').classes('flex-grow w-full relative overflow-hidden'):
+            messages_container = ui.column().classes(
+                'absolute inset-0 overflow-y-auto p-4 gap-2' 
+            )
+            # Spinner is defined and placed here, centered over messages_container
+            spinner = ui.spinner(size='xl', color='primary').classes(
+                'absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2'
+            )
+            if spinner: spinner.visible = False # Start hidden
         
         # Input area (footer)
         with ui.row().classes('w-full p-4 bg-gray-50 border-t items-center gap-2'):
@@ -102,6 +120,9 @@ async def chat_page():
     # --- Chat Logic & Refreshable Components ---
     @ui.refreshable
     def update_chat_list():
+        nonlocal chat_list_ui # chat_list_ui is modified here
+        if not chat_list_ui: return
+
         chat_list_ui.clear()
         user_email = app.storage.user.get('user_email')
         if not user_email:
@@ -135,25 +156,34 @@ async def chat_page():
                             ui.label(timestamp_str).classes('text-xs text-gray-500')
     
     async def select_chat(chat_id: str):
+        nonlocal message_input # message_input is modified
         print(f"Selected chat: {chat_id}")
-        message_input.value = '' # Clear input when switching chats
-        await load_and_display_chat_history(chat_id) # This will set active_chat_id and refresh list via its own call
+        if message_input: message_input.value = '' # Clear input when switching chats
+        await load_and_display_chat_history(chat_id) 
 
     async def start_new_chat():
+        nonlocal messages_container, message_input # These are modified
         new_id = str(uuid.uuid4())
         app.storage.user['active_chat_id'] = new_id
         print(f"Starting new chat with ID: {new_id}")
-        messages_container.clear()
-        with messages_container:
-             ui.markdown("Nuevo chat iniciado. Describe tu idea y desarrollemosla juntos.").classes('self-start bg-gray-200 p-3 rounded-lg max-w-[80%]')
-        message_input.enable()
-        message_input.value = ''
+        if messages_container:
+            messages_container.clear()
+            with messages_container:
+                 ui.markdown("Nuevo chat iniciado. Describe tu idea y desarrollemosla juntos.").classes('self-start bg-gray-200 p-3 rounded-lg max-w-[80%]')
+        if message_input:
+            message_input.enable()
+            message_input.value = ''
         update_chat_list.refresh() 
         await scroll_messages_to_bottom()
 
     async def send_current_message():
+        nonlocal messages_container, message_input, spinner # These are accessed/modified
         user_email = app.storage.user.get('user_email')
         active_chat_id = app.storage.user.get('active_chat_id')
+        
+        if not message_input: # Guard against None
+            ui.notify("Error: El campo de mensaje no está inicializado.", type='negative')
+            return
         text = message_input.value.strip()
         
         if not user_email or not text or not active_chat_id:
@@ -164,12 +194,13 @@ async def chat_page():
         
         message_input.value = '' # Clear input immediately
 
+        if not messages_container: return
         with messages_container:
             with ui.element('div').classes('self-end bg-blue-500 text-white p-3 rounded-lg max-w-[80%]'):
                 ui.markdown(text)
         await scroll_messages_to_bottom()
 
-        spinner.visible = True
+        if spinner: spinner.visible = True
         try:
             response_data = await message_router.process_user_message(
                 message=text,
@@ -202,7 +233,7 @@ async def chat_page():
                     ui.markdown(f"**⚠️ Error del Sistema**\n\nNo se pudo obtener respuesta: {e}")
             await scroll_messages_to_bottom()
         finally:
-            spinner.visible = False
+            if spinner: spinner.visible = False
 
         update_chat_list.refresh() # Refresh sidebar, timestamps might have updated
 
@@ -226,13 +257,14 @@ async def chat_page():
             await load_and_display_chat_history(most_recent_chat_id)
             # update_chat_list.refresh() # load_and_display_chat_history already calls this
         else:
-            messages_container.clear()
-            with messages_container:
-                ui.markdown("Bienvenido! Inicia un nuevo chat para comenzar o selecciona uno anterior si existe.").classes('self-start bg-gray-200 p-3 rounded-lg max-w-[80%]')
-            message_input.disable()
+            if messages_container: messages_container.clear()
+            if messages_container:
+                with messages_container:
+                    ui.markdown("Bienvenido! Inicia un nuevo chat para comenzar o selecciona uno anterior si existe.").classes('self-start bg-gray-200 p-3 rounded-lg max-w-[80%]')
+            if message_input: message_input.disable()
 
     # Add asyncio import if not already present at the top
-    import asyncio
+    # import asyncio # Already present
 
 # Note: The FilcAgentClient and MessageRouter integrations are placeholders
 # and would need to be fully integrated into the send_current_message logic.

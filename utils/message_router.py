@@ -29,6 +29,7 @@ class MessageRouter:
             Response data with content and raw response, or an error.
         """
         try:
+            print(f"MessageRouter: Processing message from {user_email} for chat {chat_session_id}: '{message[:50]}...'" ) # Log entry
             # Save user message to database.
             # user_id will be resolved by save_message via get_or_create_user_by_email.
             user_message_id = self.db_adapter.save_message(
@@ -40,33 +41,39 @@ class MessageRouter:
             if not user_message_id:
                 print(f"Error saving user message for {user_email} in chat {chat_session_id}. Aborting.")
                 return {"error": "Failed to save user message."}
+            print(f"MessageRouter: User message saved with ID: {user_message_id}")
             
             # Get conversation history for context, using the chat_session_id
             history = self.db_adapter.get_conversation_history(chat_session_id)
+            print(f"MessageRouter: Fetched history for chat {chat_session_id}. Number of messages: {len(history)}")
             
             # Update user status to Active (identified by email)
             self.db_adapter.update_user_status(identifier=user_email, status="Active", is_email=True)
             
             # Send to FILC Agent API
             # Note: filc_client.process_message might also need to be updated if it expects an old session_id model
+            print(f"MessageRouter: Calling FilcAgentClient.process_message for chat {chat_session_id}")
             response_from_agent = await self.filc_client.process_message(
                 message=message,
                 session_id=chat_session_id, # Assuming filc_client uses this as a context/history key
                 history=history
                 # Potentially pass user_email or a user identifier if filc_client needs it
             )
+            print(f"MessageRouter: Received response from agent: {json.dumps(response_from_agent, indent=2)}")
             
             # Extract response text
             response_text = self._extract_response_text(response_from_agent)
+            print(f"MessageRouter: Extracted response text: '{response_text}'")
             
             # Save assistant response to database
             if response_text:
-                self.db_adapter.save_message(
+                assistant_message_id = self.db_adapter.save_message(
                     user_email=user_email,
                     chat_session_id=chat_session_id,
                     content=response_text,
                     role="assistant"
                 )
+                print(f"MessageRouter: Assistant response saved with ID: {assistant_message_id}")
             else:
                 # Handle cases where response_text might be empty or None from _extract_response_text
                 print(f"No valid response text extracted from agent for chat {chat_session_id}. Not saving assistant message.")
@@ -83,10 +90,11 @@ class MessageRouter:
                 result["error"] = response_from_agent.get("error")
                 result["error_type"] = "non_critical"
                 
+            print(f"MessageRouter: Successfully processed. Returning to UI: {json.dumps(result, indent=2)}")
             return result
             
         except Exception as e:
-            print(f"Error in MessageRouter.process_user_message for {user_email}, chat {chat_session_id}: {e}")
+            print(f"MessageRouter: CRITICAL ERROR in process_user_message for {user_email}, chat {chat_session_id}: {e}", flush=True)
             # Update user status to Failed (identified by email)
             self.db_adapter.update_user_status(identifier=user_email, status="FailedInteraction", is_email=True)
             return {"error": f"An unexpected error occurred: {str(e)}"}
@@ -95,6 +103,7 @@ class MessageRouter:
         """
         Extract text from FILC Agent API response.
         """
+        print(f"MessageRouter._extract_response_text: Analyzing agent response: {json.dumps(response, indent=2)}")
         if not isinstance(response, dict):
             print(f"Warning: Agent response is not a dict: {response}")
             return str(response) # Or handle more gracefully
