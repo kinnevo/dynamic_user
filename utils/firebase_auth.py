@@ -169,7 +169,8 @@ class FirebaseAuth:
     def login_user(email, password):
         """
         Login a user with email and password
-        Returns user data or error
+        Returns user data or error. The user data from Pyrebase typically includes
+        'email', 'idToken', 'refreshToken', 'localId' (UID), etc.
         """
         print(f"Attempting to login user: {email}")
         if auth_instance is None:
@@ -178,42 +179,87 @@ class FirebaseAuth:
             
         try:
             user = auth_instance.sign_in_with_email_and_password(email, password)
-            print(f"User {email} logged in successfully")
-            return {"success": True, "user": user}
+            # Pyrebase user object contains: kind, localId, email, displayName, idToken, registered, refreshToken, expiresIn
+            print(f"User {user.get('email', email)} logged in successfully. UID: {user.get('localId')}")
+            return {"success": True, "user": user} # user is a dict-like object
         except Exception as e:
-            print(f"Error during user login: {e}")
-            return {"success": False, "error": str(e)}
+            # Attempt to parse Firebase error response if possible
+            error_message = str(e)
+            try:
+                error_json = json.loads(str(e).split('Reason: ', 1)[1])
+                error_message = error_json.get('error', {}).get('message', str(e))
+            except:
+                pass # Keep original error message if parsing fails
+            print(f"Error during user login for {email}: {error_message}")
+            return {"success": False, "error": error_message}
 
     @staticmethod
     def logout_user():
         """
-        Logout the current user
+        Logout the current user by clearing their data from app.storage.
         """
-        # Ensure user storage exists
         FirebaseAuth._ensure_user_storage()
-        print("Logging out user")
+        print("Logging out user...")
         
-        # Pyrebase doesn't have a logout method as it's stateless
-        # We just clear the session data
-        if 'user' in app.storage.user:
+        logged_out = False
+        if 'user_email' in app.storage.user:
+            del app.storage.user['user_email']
+            logged_out = True
+        if 'firebase_user_data' in app.storage.user:
+            del app.storage.user['firebase_user_data']
+            logged_out = True
+        if 'active_chat_id' in app.storage.user:
+            del app.storage.user['active_chat_id']
+            # No need to set logged_out = True again
+
+        # Also clear the old 'user' key if it exists
+        if 'user' in app.storage.user: # For backward compatibility cleanup
             del app.storage.user['user']
-            print("User logged out successfully")
+            logged_out = True
+
+        if logged_out:
+            print("User session data cleared. User logged out.")
+        else:
+            print("No user session data found to clear.")
         return {"success": True}
 
     @staticmethod
     def get_current_user():
         """
-        Get the current user from session
+        Get the current user's essential data (email, tokens, uid) from app.storage.
+        Returns a dictionary with user data or None if not logged in.
         """
-        # Ensure user storage exists
         FirebaseAuth._ensure_user_storage()
         
-        user = app.storage.user.get('user', None)
-        if user:
-            print(f"Current user found in session: {user.get('email', 'Unknown email')}")
+        firebase_data = app.storage.user.get('firebase_user_data', None)
+        user_email = app.storage.user.get('user_email', None)
+
+        if firebase_data and user_email:
+            # Ensure the structure is consistent and contains what we need
+            current_user_info = {
+                'email': user_email,
+                'uid': firebase_data.get('localId'), # Firebase User ID
+                'idToken': firebase_data.get('idToken'),
+                'refreshToken': firebase_data.get('refreshToken'),
+                'displayName': firebase_data.get('displayName', '')
+            }
+            print(f"Current user retrieved from session: {current_user_info.get('email')}")
+            return current_user_info
         else:
-            print("No current user in session")
-        return user
+            # Compatibility: check old 'user' key if new keys are not present
+            old_user_data = app.storage.user.get('user', None)
+            if old_user_data and old_user_data.get('email') and old_user_data.get('idToken'):
+                 print(f"Current user retrieved from session (legacy format): {old_user_data.get('email')}")
+                 # It's better to re-store in new format if found in old, but for now just return
+                 return {
+                    'email': old_user_data.get('email'),
+                    'uid': old_user_data.get('localId'),
+                    'idToken': old_user_data.get('idToken'),
+                    'refreshToken': old_user_data.get('refreshToken'),
+                    'displayName': old_user_data.get('displayName', '')
+                 }
+            print("No current user data (email or firebase_user_data) in session.")
+            return None
 
     @staticmethod
     def refresh_token(refresh_token):
@@ -254,8 +300,11 @@ class FirebaseAuth:
     @staticmethod
     def verify_token(id_token):
         """
-        Verify a Firebase ID token
+        Verify a Firebase ID token using Firebase Admin SDK.
         """
+        if not firebase_admin._DEFAULT_APP_NAME:
+            print("Error verifying token: Firebase Admin SDK not initialized.")
+            return {"success": False, "error": "Admin SDK not initialized"}
         try:
             decoded_token = auth.verify_id_token(id_token)
             print(f"Token verified successfully for UID: {decoded_token.get('uid')}")
