@@ -71,7 +71,13 @@ def login_page():
                 
                 if result['success']:
                     # Store user data in session
-                    app.storage.user['user'] = result['user']
+                    # The 'user' object from Pyrebase contains email, idToken, refreshToken, localId (UID), etc.
+                    firebase_user_obj = result['user'] 
+                    app.storage.user['user_email'] = firebase_user_obj.get('email')
+                    app.storage.user['firebase_user_data'] = firebase_user_obj 
+                    app.storage.user['active_chat_id'] = None # Initialize active chat ID
+                    
+                    print(f"Stored in app.storage.user after login: user_email='{app.storage.user['user_email']}', active_chat_id={app.storage.user['active_chat_id']}")
                     
                     # Show success message
                     success_label.text = '¡Inicio de sesión exitoso!'
