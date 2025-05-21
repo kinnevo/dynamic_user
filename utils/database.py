@@ -50,14 +50,14 @@ class PostgresAdapter(DatabaseInterface):
         try:
             with conn.cursor() as cursor:
                 # User table: email is the primary identifier for a person
-                # session_id here might become a default or last active chat_session_id if needed,
+                # session_id here might become a default or last active session_id if needed,
                 # or removed if chat sessions are managed separately.
                 # For now, making it nullable and not necessarily unique at the user level.
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS fi_users (
                         user_id SERIAL PRIMARY KEY,
                         email VARCHAR(255) UNIQUE, -- User's email, main identifier
-                        session_id TEXT NULL,      -- This will now be chat_session_id
+                        session_id TEXT NULL,      -- This will now be session_id
                         status TEXT DEFAULT 'Idle',
                         last_active TIMESTAMP,
                         explorations_completed INTEGER DEFAULT 0,
@@ -105,11 +105,11 @@ class PostgresAdapter(DatabaseInterface):
                     END $$;
                 """)
 
-                # Messages table: session_id is the chat_session_id
+                # Messages table: session_id is the session_id
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS fi_messages (
                         message_id SERIAL PRIMARY KEY,
-                        chat_session_id TEXT NOT NULL, -- Renamed from session_id for clarity
+                        session_id TEXT NOT NULL, -- Renamed from session_id for clarity
                         user_id INTEGER NOT NULL,      -- References fi_users.user_id
                         content TEXT NOT NULL,
                         role TEXT NOT NULL,
@@ -117,37 +117,37 @@ class PostgresAdapter(DatabaseInterface):
                         FOREIGN KEY (user_id) REFERENCES fi_users(user_id)
                     );
                 """)
-                # Rename session_id to chat_session_id in fi_messages if it exists
+                # Rename session_id to session_id in fi_messages if it exists
                 cursor.execute("""
                     DO $$
                     BEGIN
                         IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fi_messages' AND column_name='session_id')
-                           AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fi_messages' AND column_name='chat_session_id')
+                           AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fi_messages' AND column_name='session_id')
                         THEN
-                            ALTER TABLE fi_messages RENAME COLUMN session_id TO chat_session_id;
+                            ALTER TABLE fi_messages RENAME COLUMN session_id TO session_id;
                         END IF;
                     END $$;
                 """)
 
-                # Summary table: session_id is the chat_session_id
+                # Summary table: session_id is the session_id
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS fi_summary (
                         summary_id SERIAL PRIMARY KEY,
-                        chat_session_id TEXT NOT NULL, -- Renamed from session_id
+                        session_id TEXT NOT NULL, -- Renamed from session_id
                         user_id INTEGER NOT NULL,      -- References fi_users.user_id
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         summary TEXT NOT NULL,
                         FOREIGN KEY (user_id) REFERENCES fi_users(user_id)
                     );
                 """)
-                # Rename session_id to chat_session_id in fi_summary if it exists
+                # Rename session_id to session_id in fi_summary if it exists
                 cursor.execute("""
                     DO $$
                     BEGIN
                         IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fi_summary' AND column_name='session_id')
-                           AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fi_summary' AND column_name='chat_session_id')
+                           AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fi_summary' AND column_name='session_id')
                         THEN
-                            ALTER TABLE fi_summary RENAME COLUMN session_id TO chat_session_id;
+                            ALTER TABLE fi_summary RENAME COLUMN session_id TO session_id;
                         END IF;
                     END $$;
                 """)
@@ -234,13 +234,13 @@ class PostgresAdapter(DatabaseInterface):
         finally:
             if conn: self.connection_pool.putconn(conn)
 
-    def save_message(self, user_email: str, chat_session_id: str, content: str, role: str) -> Optional[int]:
+    def save_message(self, user_email: str, session_id: str, content: str, role: str) -> Optional[int]:
         """
         Save a message to the database, associating it with a user (by email) and a specific chat session.
         
         Args:
             user_email: Email of the user sending the message.
-            chat_session_id: Unique identifier for the chat session.
+            session_id: Unique identifier for the chat session.
             content: Message content.
             role: Message role ('user' or 'assistant').
             
@@ -261,43 +261,43 @@ class PostgresAdapter(DatabaseInterface):
                      "UPDATE fi_users SET last_active = %s WHERE user_id = %s",
                      (get_sf_time(), user_id)
                  )
-            # Optional: Update fi_users.session_id to this chat_session_id to mark as last active chat for this user
+            # Optional: Update fi_users.session_id to this session_id to mark as last active chat for this user
             # This could be useful for quickly resuming the user's last chat.
             # For example:
             # with conn.cursor() as cursor:
             #     cursor.execute(
             #         "UPDATE fi_users SET session_id = %s WHERE user_id = %s",
-            #         (chat_session_id, user_id)
+            #         (session_id, user_id)
             #     )
             # conn.commit() # Commit if session_id in fi_users is updated
 
             # Now save the message
             with conn.cursor() as cursor:
                 cursor.execute(
-                    "INSERT INTO fi_messages (chat_session_id, user_id, content, role, timestamp) VALUES (%s, %s, %s, %s, %s) RETURNING message_id",
-                    (chat_session_id, user_id, content, role, get_sf_time())
+                    "INSERT INTO fi_messages (session_id, user_id, content, role, timestamp) VALUES (%s, %s, %s, %s, %s) RETURNING message_id",
+                    (session_id, user_id, content, role, get_sf_time())
                 )
                 message_id = cursor.fetchone()[0]
             conn.commit()
-            print(f"Message saved for user_id {user_id} in chat_session_id {chat_session_id}. Message ID: {message_id}")
+            print(f"Message saved for user_id {user_id} in session_id {session_id}. Message ID: {message_id}")
             return message_id
         except psycopg2.Error as e:
-            print(f"Database error saving message for user_email {user_email}, chat_session_id {chat_session_id}: {e}")
+            print(f"Database error saving message for user_email {user_email}, session_id {session_id}: {e}")
             if conn: conn.rollback()
             return None
         except Exception as e:
-            print(f"Unexpected error saving message for user_email {user_email}, chat_session_id {chat_session_id}: {e}")
+            print(f"Unexpected error saving message for user_email {user_email}, session_id {session_id}: {e}")
             if conn: conn.rollback()
             return None
         finally:
             if conn: self.connection_pool.putconn(conn)
     
-    def get_conversation_history(self, chat_session_id: str) -> List[Dict[str, Any]]:
+    def get_conversation_history(self, session_id: str) -> List[Dict[str, Any]]:
         """
         Get conversation history for a specific chat session
         
         Args:
-            chat_session_id: Unique chat session identifier
+            session_id: Unique chat session identifier
             
         Returns:
             List of message objects with role and content
@@ -306,8 +306,8 @@ class PostgresAdapter(DatabaseInterface):
         try:
             with conn.cursor(cursor_factory=DictCursor) as cursor:
                 cursor.execute(
-                    "SELECT role, content FROM fi_messages WHERE chat_session_id = %s ORDER BY timestamp", # Querying by chat_session_id
-                    (chat_session_id,)
+                    "SELECT role, content FROM fi_messages WHERE session_id = %s ORDER BY timestamp", # Querying by session_id
+                    (session_id,)
                 )
                 rows = cursor.fetchall()
                 # history = [dict(row) for row in rows] # Original, might include more fields than needed
@@ -322,17 +322,17 @@ class PostgresAdapter(DatabaseInterface):
                     
                 return formatted_history
         except Exception as e:
-            print(f"Error in get_conversation_history for chat_session_id {chat_session_id}: {e}")
+            print(f"Error in get_conversation_history for session_id {session_id}: {e}")
             return []
         finally:
             if conn: self.connection_pool.putconn(conn)
     
-    def get_recent_messages(self, chat_session_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+    def get_recent_messages(self, session_id: str, limit: int = 10) -> List[Dict[str, Any]]:
         """
         Get recent fi_messages for a specific chat session
         
         Args:
-            chat_session_id: Unique chat session identifier
+            session_id: Unique chat session identifier
             limit: Maximum number of fi_messages to return
             
         Returns:
@@ -342,8 +342,8 @@ class PostgresAdapter(DatabaseInterface):
         try:
             with conn.cursor(cursor_factory=DictCursor) as cursor:
                 cursor.execute(
-                    "SELECT role, content, timestamp FROM fi_messages WHERE chat_session_id = %s ORDER BY timestamp DESC LIMIT %s", # Querying by chat_session_id
-                    (chat_session_id, limit)
+                    "SELECT role, content, timestamp FROM fi_messages WHERE session_id = %s ORDER BY timestamp DESC LIMIT %s", # Querying by session_id
+                    (session_id, limit)
                 )
                 rows = cursor.fetchall()
                 recent_messages = [dict(row) for row in rows]
@@ -353,7 +353,7 @@ class PostgresAdapter(DatabaseInterface):
                 
                 return recent_messages
         except Exception as e:
-            print(f"Error in get_recent_messages for chat_session_id {chat_session_id}: {e}")
+            print(f"Error in get_recent_messages for session_id {session_id}: {e}")
             return []
         finally:
             if conn: self.connection_pool.putconn(conn)
@@ -469,7 +469,7 @@ class PostgresAdapter(DatabaseInterface):
             user_email: The email of the user.
         Returns:
             A list of dictionaries, each representing a chat session 
-            (e.g., {'chat_session_id': str, 'last_message_timestamp': datetime, 'first_message_preview': str}).
+            (e.g., {'session_id': str, 'last_message_timestamp': datetime, 'first_message_preview': str}).
         """
         user = self.get_user_by_email(user_email)
         if not user:
@@ -480,38 +480,38 @@ class PostgresAdapter(DatabaseInterface):
         conn = self.connection_pool.getconn()
         try:
             with conn.cursor(cursor_factory=DictCursor) as cursor:
-                # This query finds all chat_session_ids for the user,
+                # This query finds all session_ids for the user,
                 # the timestamp of the last message in each session,
                 # and the content of the first message in each session for preview.
                 cursor.execute("""
                     WITH UserChatSessions AS (
-                        SELECT DISTINCT chat_session_id
+                        SELECT DISTINCT session_id
                         FROM fi_messages
                         WHERE user_id = %s
                     ),
                     LastMessageInSession AS (
                         SELECT 
-                            chat_session_id, 
+                            session_id, 
                             MAX(timestamp) as last_message_timestamp
                         FROM fi_messages
                         WHERE user_id = %s
-                        GROUP BY chat_session_id
+                        GROUP BY session_id
                     ),
                     FirstMessageInSession AS (
                         SELECT 
-                            chat_session_id, 
+                            session_id, 
                             content as first_message_content,
-                            ROW_NUMBER() OVER (PARTITION BY chat_session_id ORDER BY timestamp ASC) as rn
+                            ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY timestamp ASC) as rn
                         FROM fi_messages
                         WHERE user_id = %s
                     )
                     SELECT 
-                        ucs.chat_session_id,
+                        ucs.session_id,
                         lmis.last_message_timestamp,
                         fmis.first_message_content
                     FROM UserChatSessions ucs
-                    JOIN LastMessageInSession lmis ON ucs.chat_session_id = lmis.chat_session_id
-                    LEFT JOIN FirstMessageInSession fmis ON ucs.chat_session_id = fmis.chat_session_id AND fmis.rn = 1
+                    JOIN LastMessageInSession lmis ON ucs.session_id = lmis.session_id
+                    LEFT JOIN FirstMessageInSession fmis ON ucs.session_id = fmis.session_id AND fmis.rn = 1
                     ORDER BY lmis.last_message_timestamp DESC;
                 """, (user_id, user_id, user_id))
                 
@@ -571,7 +571,7 @@ class PostgresAdapter(DatabaseInterface):
                 query = """
                     SELECT 
                         m.message_id, 
-                        m.chat_session_id,  -- Changed from m.session_id
+                        m.session_id,  -- Changed from m.session_id
                         m.user_id, 
                         m.content, 
                         m.role, 
@@ -606,20 +606,20 @@ class PostgresAdapter(DatabaseInterface):
                         params.extend(int_user_ids)
                 
                 # Add ordering
-                query += " ORDER BY m.chat_session_id, m.timestamp"
+                query += " ORDER BY m.session_id, m.timestamp"
                 
                 # Execute the query
                 cursor.execute(query, params)
                 rows = cursor.fetchall()
                 
-                # Group messages by conversation (chat_session_id)
+                # Group messages by conversation (session_id)
                 conversations = {}
                 for row in rows:
-                    chat_session_id = row['chat_session_id'] # Changed from session_id
+                    session_id = row['session_id'] # Changed from session_id
                     
-                    if chat_session_id not in conversations:
-                        conversations[chat_session_id] = {
-                            'chat_session_id': chat_session_id, # Changed from session_id
+                    if session_id not in conversations:
+                        conversations[session_id] = {
+                            'session_id': session_id, # Changed from session_id
                             'user_id': row['user_id'],
                             'user_email': row['user_email'], # Added
                             'user_legacy_session_id': row['user_legacy_session_id'], # Added for context
@@ -630,11 +630,11 @@ class PostgresAdapter(DatabaseInterface):
                         }
                     
                     # Update conversation metadata
-                    conversations[chat_session_id]['message_count'] += 1
-                    conversations[chat_session_id]['end_time'] = max(conversations[chat_session_id]['end_time'], row['timestamp'])
+                    conversations[session_id]['message_count'] += 1
+                    conversations[session_id]['end_time'] = max(conversations[session_id]['end_time'], row['timestamp'])
                     
                     # Add message to the conversation
-                    conversations[chat_session_id]['messages'].append({
+                    conversations[session_id]['messages'].append({
                         'message_id': row['message_id'],
                         'content': row['content'],
                         'role': row['role'],
@@ -647,7 +647,7 @@ class PostgresAdapter(DatabaseInterface):
                     if conv['message_count'] >= min_messages:
                         filtered_conversations.append(conv)
                     else:
-                        print(f"Skipping conversation {conv['chat_session_id']} with only {conv['message_count']} message(s)") # Changed from session_id
+                        print(f"Skipping conversation {conv['session_id']} with only {conv['message_count']} message(s)") # Changed from session_id
                 
                 return filtered_conversations
                 
@@ -657,12 +657,12 @@ class PostgresAdapter(DatabaseInterface):
         finally:
             self.connection_pool.putconn(conn)
     
-    def create_conversation_summary(self, chat_session_id: str, user_email: str) -> Optional[str]: # Added user_email, session_id is now chat_session_id
+    def create_conversation_summary(self, session_id: str, user_email: str) -> Optional[str]: # Added user_email, session_id is now session_id
         """
         Create a summary for a conversation using GPT-4o
         
         Args:
-            chat_session_id: The chat session ID of the conversation
+            session_id: The chat session ID of the conversation
             user_email: The email of the user associated with the conversation.
             
         Returns:
@@ -678,22 +678,22 @@ class PostgresAdapter(DatabaseInterface):
         try:
             # First check if summary already exists
             with conn.cursor() as cursor:
-                cursor.execute("SELECT summary_id FROM fi_summary WHERE chat_session_id = %s AND user_id = %s", (chat_session_id, user_id)) # Check with user_id too
+                cursor.execute("SELECT summary_id FROM fi_summary WHERE session_id = %s AND user_id = %s", (session_id, user_id)) # Check with user_id too
                 if cursor.fetchone():
-                    print(f"Summary already exists for chat {chat_session_id} by user {user_id}")
+                    print(f"Summary already exists for chat {session_id} by user {user_id}")
                     return None # Or fetch existing summary
                 
                 # Check if there are any messages in this conversation
-                cursor.execute("SELECT COUNT(*) FROM fi_messages WHERE chat_session_id = %s AND user_id = %s", (chat_session_id, user_id))
+                cursor.execute("SELECT COUNT(*) FROM fi_messages WHERE session_id = %s AND user_id = %s", (session_id, user_id))
                 message_count = cursor.fetchone()[0]
                 if message_count == 0:
-                    print(f"Skipping summary generation for chat {chat_session_id}: No messages found")
+                    print(f"Skipping summary generation for chat {session_id}: No messages found")
                     return None
             
             # Get all messages for this session
-            messages_text = self.get_messages_for_summary(chat_session_id, user_id) # Pass user_id for context
+            messages_text = self.get_messages_for_summary(session_id, user_id) # Pass user_id for context
             if not messages_text:
-                print(f"No messages found for chat {chat_session_id}")
+                print(f"No messages found for chat {session_id}")
                 return None
             
             # Generate summary using GPT-4o
@@ -703,12 +703,12 @@ class PostgresAdapter(DatabaseInterface):
                 # Store summary in database
                 with conn.cursor() as cursor:
                     cursor.execute(
-                        "INSERT INTO fi_summary (chat_session_id, user_id, created_at, summary) VALUES (%s, %s, %s, %s) RETURNING summary_id",
-                        (chat_session_id, user_id, get_sf_time(), summary_content)
+                        "INSERT INTO fi_summary (session_id, user_id, created_at, summary) VALUES (%s, %s, %s, %s) RETURNING summary_id",
+                        (session_id, user_id, get_sf_time(), summary_content)
                     )
                     summary_id = cursor.fetchone()[0]
                 conn.commit()
-                print(f"Summary created for chat {chat_session_id}, user_id {user_id}. Summary ID: {summary_id}")
+                print(f"Summary created for chat {session_id}, user_id {user_id}. Summary ID: {summary_id}")
                 return summary_content
             except Exception as e:
                 print(f"Error generating summary: {e}")
@@ -722,12 +722,12 @@ class PostgresAdapter(DatabaseInterface):
         finally:
             self.connection_pool.putconn(conn)
     
-    def get_messages_for_summary(self, chat_session_id: str, user_id: Optional[int] = None) -> str: # user_id is optional but recommended
+    def get_messages_for_summary(self, session_id: str, user_id: Optional[int] = None) -> str: # user_id is optional but recommended
         """
         Get all messages for a session formatted for summarization
         
         Args:
-            chat_session_id: The chat session ID to get messages for
+            session_id: The chat session ID to get messages for
             user_id: Optional user_id to scope messages further if needed.
             
         Returns:
@@ -736,8 +736,8 @@ class PostgresAdapter(DatabaseInterface):
         conn = self.connection_pool.getconn()
         try:
             with conn.cursor() as cursor:
-                query = "SELECT role, content, timestamp FROM fi_messages WHERE chat_session_id = %s"
-                params = [chat_session_id]
+                query = "SELECT role, content, timestamp FROM fi_messages WHERE session_id = %s"
+                params = [session_id]
                 if user_id is not None: # If user_id is provided, add it to the query
                     query += " AND user_id = %s"
                     params.append(user_id)
@@ -847,7 +847,7 @@ SUMMARY:"""
                     query = """
                         SELECT 
                             s.summary_id, 
-                            s.chat_session_id, -- Changed from s.session_id
+                            s.session_id, -- Changed from s.session_id
                             s.user_id, 
                             s.created_at, 
                             s.summary,
@@ -868,7 +868,7 @@ SUMMARY:"""
                     query = """
                         SELECT 
                             summary_id, 
-                            chat_session_id, -- Changed from session_id
+                            session_id, -- Changed from session_id
                             user_id, 
                             created_at, 
                             summary
@@ -936,7 +936,7 @@ SUMMARY:"""
                 query = """
                     SELECT 
                         s.summary_id, 
-                        s.chat_session_id, -- Changed from s.session_id 
+                        s.session_id, -- Changed from s.session_id 
                         s.user_id, 
                         s.created_at, 
                         s.summary,

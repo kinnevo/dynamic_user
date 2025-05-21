@@ -53,7 +53,7 @@ async def chat_page():
         
         if spinner: spinner.visible = True
         try:
-            history = await asyncio.to_thread(db_adapter.get_recent_messages, chat_session_id=chat_id, limit=100)
+            history = await asyncio.to_thread(db_adapter.get_recent_messages, session_id=chat_id, limit=100)
             if not messages_container: return 
             
             if not history:
@@ -138,7 +138,7 @@ async def chat_page():
             with chat_list_ui:
                 active_chat_id_local = app.storage.user.get('active_chat_id')
                 for session in chat_sessions:
-                    chat_id = session['chat_session_id']
+                    chat_id = session['session_id']
                     preview = session.get('first_message_content', 'Chat iniciado')
                     if preview:
                         preview = preview[:30] + ("..." if len(preview) > 30 else "")
@@ -205,7 +205,7 @@ async def chat_page():
             response_data = await message_router.process_user_message(
                 message=text,
                 user_email=user_email,
-                chat_session_id=active_chat_id
+                session_id=active_chat_id
             )
             
             assistant_response_content = "Error: No se pudo obtener respuesta del asistente."
@@ -252,7 +252,7 @@ async def chat_page():
     else:
         chat_sessions = db_adapter.get_chat_sessions_for_user(user_email)
         if chat_sessions:
-            most_recent_chat_id = chat_sessions[0]['chat_session_id']
+            most_recent_chat_id = chat_sessions[0]['session_id']
             app.storage.user['active_chat_id'] = most_recent_chat_id
             await load_and_display_chat_history(most_recent_chat_id)
             # update_chat_list.refresh() # load_and_display_chat_history already calls this
