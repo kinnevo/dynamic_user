@@ -47,6 +47,7 @@ class FilcAgentClient:
             "context": context
         }
         
+        print(f"FILC Agent: Sending payload to {self.base_url}{self.chat_endpoint}: {json.dumps(payload, indent=2)}")
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
@@ -55,9 +56,12 @@ class FilcAgentClient:
                     json=payload,
                     timeout=60  # Same timeout as original script
                 ) as response:
+                    response_status = response.status
+                    print(f"FILC Agent: Received status code {response_status}")
                     if response.status == 200:
                         self.connection_status = "connected"
                         result = await response.json()
+                        print(f"FILC Agent: Received JSON response: {json.dumps(result, indent=2)}")
                         # Assuming the API returns a response with content field
                         # Adjust this based on the actual API response structure
                         return {"content": result.get("response", ""), "success": True}
