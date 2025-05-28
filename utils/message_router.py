@@ -2,6 +2,7 @@ from typing import Dict, Any, List, Optional
 import json
 from utils.filc_agent_client import FilcAgentClient
 from utils.unified_database import UnifiedDatabaseAdapter
+from utils.firebase_auth import FirebaseAuth
 import openai
 import os
 from datetime import datetime
@@ -35,13 +36,22 @@ class MessageRouter:
         """
         try:
             print(f"MessageRouter: Processing message from {user_email} for chat {session_id}: '{message[:50]}...'" ) # Log entry
-            # Save user message to database.
-            # user_id will be resolved by save_message via get_or_create_user_by_email.
+            
+            # Get current user Firebase data
+            current_user = FirebaseAuth.get_current_user()
+            firebase_uid = current_user.get('uid') if current_user else None
+            display_name = current_user.get('displayName') if current_user else None
+            
+            print(f"MessageRouter: User Firebase UID: {firebase_uid}, Display Name: {display_name}")
+            
+            # Save user message to database with Firebase UID and display name
             user_message_id = self.db_adapter.save_message(
                 user_email=user_email,
                 session_id=session_id,
                 content=message,
-                role="user"
+                role="user",
+                firebase_uid=firebase_uid,
+                display_name=display_name
             )
             if not user_message_id:
                 print(f"Error saving user message for {user_email} in chat {session_id}. Aborting.")
@@ -70,13 +80,15 @@ class MessageRouter:
             response_text = self._extract_response_text(response_from_agent)
             # print(f"MessageRouter: Extracted response text: '{response_text}'")
             
-            # Save assistant response to database
+            # Save assistant response to database with Firebase UID
             if response_text:
                 assistant_message_id = self.db_adapter.save_message(
                     user_email=user_email,
                     session_id=session_id,
                     content=response_text,
-                    role="assistant"
+                    role="assistant",
+                    firebase_uid=firebase_uid,
+                    display_name=display_name
                 )
                 # print(f"MessageRouter: Assistant response saved with ID: {assistant_message_id}")
             else:
