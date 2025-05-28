@@ -294,7 +294,7 @@ class UnifiedDatabaseAdapter(DatabaseInterface):
             if conn: 
                 self.connection_pool.putconn(conn)
 
-    def save_message(self, user_email: str, session_id: str, content: str, role: str, model_used: str = None) -> Optional[int]:
+    def save_message(self, user_email: str, session_id: str, content: str, role: str, model_used: str = None, firebase_uid: str = None, display_name: str = None) -> Optional[int]:
         """
         Save a message to the database.
         
@@ -304,12 +304,18 @@ class UnifiedDatabaseAdapter(DatabaseInterface):
             content: Message content
             role: Message role ('user' or 'assistant')
             model_used: AI model used (for assistant messages)
+            firebase_uid: Firebase User ID (optional, recommended)
+            display_name: User's display name (optional)
             
         Returns:
             message_id if successful, None otherwise
         """
-        # Get or create user
-        user_id = self.get_or_create_user_by_email(user_email)
+        # Get or create user with Firebase UID if provided
+        user_id = self.get_or_create_user_by_email(
+            email=user_email,
+            firebase_uid=firebase_uid,
+            display_name=display_name
+        )
         if not user_id:
             print(f"❌ Could not get or create user for email {user_email}")
             return None
