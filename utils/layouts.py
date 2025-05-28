@@ -1,5 +1,4 @@
 from nicegui import ui, app
-from utils.state import set_user_logout_state
 from utils.unified_database import UnifiedDatabaseAdapter
 from utils.firebase_auth import FirebaseAuth
 from datetime import datetime, timedelta
@@ -30,22 +29,29 @@ def create_navigation_menu(current_page: str):
                     ui.label('Reportes')
 
 def clearSessionAndRedirect():
-    # Setting the logout state is fine as it's server-side
-    set_user_logout_state(True)
+    # Use Firebase logout method instead of old state management
+    logout_result = FirebaseAuth.logout_user()
     
-    # Instead of trying to clear storage directly, use client-side JavaScript
-    ui.run_javascript("""
-        // Clear all browser storage
-        localStorage.clear();
-        sessionStorage.clear();
+    if logout_result.get("success"):
+        # Clear browser storage and redirect
+        ui.run_javascript("""
+            // Clear all browser storage
+            localStorage.clear();
+            sessionStorage.clear();
+            
+            // Redirect to home page with special parameter
+            window.location.href = '/home?newSession=true';
+        """)
         
-        // Redirect to home page with special parameter
-        window.location.href = '/home?newSession=true';
-    """)
-
-    
-    # This notification might not show since we're redirecting
-    ui.notify('Sesión eliminada correctamente')
+        ui.notify('Session logged out successfully', type='positive')
+    else:
+        ui.notify('Error logging out', type='negative')
+        # Still try to clear browser storage and redirect even if Firebase logout fails
+        ui.run_javascript("""
+            localStorage.clear();
+            sessionStorage.clear();
+            window.location.href = '/home?newSession=true';
+        """)
 
 def create_navigation_menu_2():
     with ui.header().classes('items-center justify-between'):
