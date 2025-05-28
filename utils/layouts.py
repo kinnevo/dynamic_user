@@ -1,7 +1,9 @@
 from nicegui import ui, app
 from utils.state import set_user_logout_state
-from utils.database import PostgresAdapter
-from datetime import datetime
+from utils.unified_database import UnifiedDatabaseAdapter
+from utils.firebase_auth import FirebaseAuth
+from datetime import datetime, timedelta
+import pytz
 
 def create_navigation_menu(current_page: str):
     """Create consistent navigation menu for all pages
@@ -159,7 +161,7 @@ def create_user_selector(container=None, width='w-1/3'):
     Returns:
         Tuple of (user_select, refresh_function)
     """
-    user_db = PostgresAdapter()
+    user_db = UnifiedDatabaseAdapter()
     
     if container is None:
         container = ui
@@ -172,7 +174,7 @@ def create_user_selector(container=None, width='w-1/3'):
         try:
             conn = user_db.connection_pool.getconn()
             with conn.cursor() as cursor:
-                cursor.execute("SELECT user_id FROM fi_users ORDER BY user_id")
+                cursor.execute("SELECT id FROM users ORDER BY id")
                 rows = cursor.fetchall()
                 
                 # Add individual users to dictionary

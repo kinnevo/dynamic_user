@@ -1,13 +1,13 @@
 from nicegui import ui, app
 # import uuid # No longer needed for session_id generation here
 # from utils.state import logout, set_user_logout_state # logout flag and set_user_logout_state might be re-evaluated
-from utils.database import PostgresAdapter
+from utils.unified_database import UnifiedDatabaseAdapter
 from utils.layouts import create_navigation_menu_2 # Assuming this is still used for nav bar
 from utils.firebase_auth import FirebaseAuth
 from utils.auth_middleware import get_user_display_name, auth_required
 
 # Initialize database adapter
-db_adapter = PostgresAdapter()
+db_adapter = UnifiedDatabaseAdapter()
 
 @ui.page('/home')
 @auth_required
