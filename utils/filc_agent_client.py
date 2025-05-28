@@ -57,7 +57,7 @@ class FilcAgentClient:
                     timeout=60  # Same timeout as original script
                 ) as response:
                     response_status = response.status
-                    print(f"FILC Agent: Received status code {response_status}")
+                    # print(f"FILC Agent: Received status code {response_status}")
                     if response.status == 200:
                         self.connection_status = "connected"
                         result = await response.json()
