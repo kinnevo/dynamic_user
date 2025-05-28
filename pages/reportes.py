@@ -91,15 +91,16 @@ def reportes_page():
                 session_info = ui.label().classes('text-subtitle2 mb-4 text-blue-600')
                 
                 def update_session_info():
-                    if session_selector.value:
-                        # Find the session details
+                    if session_selector.value and session_selector.value in session_options:
+                        # Get the actual session_id from the selected label
+                        selected_session_id = session_options[session_selector.value]
                         selected_session = next(
-                            (s for s in chat_sessions if s['session_id'] == session_selector.value), 
+                            (s for s in chat_sessions if s['session_id'] == selected_session_id), 
                             None
                         )
                         if selected_session:
-                            message_count = len(db_adapter.get_recent_messages(session_selector.value, limit=1000))
-                            session_info.text = f"Sesión seleccionada: {session_selector.value[:8]}... | Total mensajes: {message_count}"
+                            message_count = len(db_adapter.get_recent_messages(selected_session_id, limit=1000))
+                            session_info.text = f"Sesión seleccionada: {selected_session_id[:8]}... | Total mensajes: {message_count}"
                         else:
                             session_info.text = "Sesión no encontrada"
                     else:
@@ -122,11 +123,12 @@ def reportes_page():
                 wordcloud_plot = ui.plotly(initial_fig).classes('w-full h-[500px] border rounded my-4')
                 
                 def generate_wordcloud():
-                    # Get selected session ID from dropdown
-                    selected_session_id = session_selector.value
-                    if not selected_session_id:
+                    # Get selected session ID from dropdown (convert label to session_id)
+                    if not session_selector.value or session_selector.value not in session_options:
                         ui.notify('Por favor selecciona una conversación', type='warning')
                         return
+                    
+                    selected_session_id = session_options[session_selector.value]
                     
                     # Get all messages for selected session
                     messages = db_adapter.get_recent_messages(selected_session_id, limit=1000)
@@ -215,7 +217,7 @@ def reportes_page():
                 ui.button('Generar Wordcloud', on_click=generate_wordcloud).props('color=primary size=lg').classes('mb-4')
                 
                 # Auto-generate wordcloud on page load with first session
-                if selected_session_id:
+                if session_selector.value and session_selector.value in session_options:
                     ui.timer(1.0, generate_wordcloud, once=True)
                 
             with ui.tab_panel('Otros Reportes'):
