@@ -78,13 +78,12 @@ def reportes_page():
 
                 # Default to first session
                 default_session_label = list(session_options.keys())[0] if session_options else None
-                selected_session_id = session_options.get(default_session_label) if default_session_label else None
-
+                
                 # Session selector dropdown
                 ui.label('Selecciona una conversación:').classes('text-subtitle1 mb-2')
                 session_selector = ui.select(
                     options=session_options,
-                    value=selected_session_id,
+                    value=default_session_label,  # Use the label as value, not the session_id
                     label='Conversación'
                 ).classes('w-full max-w-md mb-4')
 
