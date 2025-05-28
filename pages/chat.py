@@ -87,8 +87,8 @@ async def chat_page():
             return
             
         try:
-            # Try the direct element approach first
-            await ui.run_javascript(f'''
+            # Fire-and-forget JavaScript call - don't await to avoid KeyError
+            ui.run_javascript(f'''
                 setTimeout(() => {{
                     // Method 1: Direct element access
                     try {{
