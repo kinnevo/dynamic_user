@@ -86,28 +86,53 @@ async def chat_page():
             return
         
         try:
-            # Use a more robust JavaScript approach with better error handling
+            # Use a more robust JavaScript approach with better timing
             await ui.run_javascript(
                 f"""
                 try {{
                     var el = getElement({messages_container.id});
                     if (el) {{
+                        // Wait a bit longer for DOM to update, then scroll
                         setTimeout(() => {{
                             el.scrollTop = el.scrollHeight;
-                        }}, 50);
+                        }}, 200);
                     }}
                 }} catch (error) {{
                     console.log('Scroll error (non-critical):', error);
                 }}
                 """, 
-                timeout=2.0,
-                respond=False  # Don't wait for response to improve performance
+                timeout=3.0
+                # Removed respond=False to ensure proper execution
             )
         except asyncio.TimeoutError:
             # Don't print error for timeout - it's not critical
             pass
         except Exception as e:
             # Only log other types of errors, and make them less verbose
+            pass
+
+    # Alternative simple scroll method for immediate use
+    async def scroll_to_bottom_simple():
+        nonlocal messages_container
+        if not messages_container:
+            return
+        
+        try:
+            # Simple, immediate scroll
+            await ui.run_javascript(
+                f"""
+                try {{
+                    var el = getElement({messages_container.id});
+                    if (el) {{
+                        el.scrollTop = el.scrollHeight;
+                    }}
+                }} catch (error) {{
+                    console.log('Simple scroll error:', error);
+                }}
+                """, 
+                timeout=1.0
+            )
+        except Exception:
             pass
 
     # Alternative scroll method using CSS-based approach (deprecated - keeping for fallback)
@@ -252,7 +277,7 @@ async def chat_page():
         with messages_container:
             with ui.element('div').classes('self-end bg-blue-500 text-white p-3 rounded-lg max-w-[80%]'):
                 ui.markdown(text)
-        await scroll_messages_to_bottom()  # Use CSS-based scroll instead of async JS
+        await scroll_to_bottom_simple()  # Immediate scroll for user message
 
         if spinner: spinner.visible = True
         try:
@@ -272,7 +297,8 @@ async def chat_page():
             with messages_container:
                 with ui.element('div').classes('self-start bg-gray-200 p-3 rounded-lg max-w-[80%]'):
                     ui.markdown(assistant_response_content)
-            await scroll_messages_to_bottom()  # Use CSS-based scroll instead of async JS
+            await scroll_to_bottom_simple()  # Immediate scroll
+            await scroll_messages_to_bottom()  # Delayed scroll for reliability
 
             if response_data.get("error") and response_data.get("error_type") == "non_critical":
                 ui.notify(f"Nota: {response_data['error']}", type='warning', timeout=5000)
