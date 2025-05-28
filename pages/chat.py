@@ -68,7 +68,7 @@ async def chat_page():
                         else: # assistant
                             with ui.element('div').classes('self-start bg-gray-200 p-3 rounded-lg max-w-[80%]'):
                                 ui.markdown(message['content'])
-            await scroll_messages_to_bottom()
+            await scroll_to_bottom()
             if message_input: message_input.enable()
         except Exception as e:
             print(f"Error loading chat history for {chat_id}: {e}")
@@ -80,91 +80,43 @@ async def chat_page():
             if spinner: spinner.visible = False
         update_chat_list.refresh() # update_chat_list is a refreshable function in scope
 
-    async def scroll_messages_to_bottom():
+    async def scroll_to_bottom():
+        """Simple scroll function using element ID and fallback methods."""
         nonlocal messages_container
-        if not messages_container: 
+        if not messages_container:
             return
-        
+            
         try:
-            # Use a more robust JavaScript approach with better timing
-            await ui.run_javascript(
-                f"""
-                try {{
-                    var el = getElement({messages_container.id});
-                    if (el) {{
-                        // Wait a bit longer for DOM to update, then scroll
-                        setTimeout(() => {{
+            # Try the direct element approach first
+            await ui.run_javascript(f'''
+                setTimeout(() => {{
+                    // Method 1: Direct element access
+                    try {{
+                        const el = getElement({messages_container.id});
+                        if (el) {{
                             el.scrollTop = el.scrollHeight;
-                        }}, 200);
-                    }}
-                }} catch (error) {{
-                    console.log('Scroll error (non-critical):', error);
-                }}
-                """, 
-                timeout=3.0
-                # Removed respond=False to ensure proper execution
-            )
-        except asyncio.TimeoutError:
-            # Don't print error for timeout - it's not critical
-            pass
-        except Exception as e:
-            # Only log other types of errors, and make them less verbose
-            pass
-
-    # Alternative simple scroll method for immediate use
-    async def scroll_to_bottom_simple():
-        nonlocal messages_container
-        if not messages_container:
-            return
-        
-        try:
-            # Simple, immediate scroll
-            await ui.run_javascript(
-                f"""
-                try {{
-                    var el = getElement({messages_container.id});
-                    if (el) {{
-                        el.scrollTop = el.scrollHeight;
-                    }}
-                }} catch (error) {{
-                    console.log('Simple scroll error:', error);
-                }}
-                """, 
-                timeout=1.0
-            )
-        except Exception:
-            pass
-
-    # Alternative scroll method using CSS-based approach (deprecated - keeping for fallback)
-    def scroll_to_bottom_css():
-        nonlocal messages_container
-        if not messages_container:
-            return
-        
-        try:
-            # Fallback CSS approach - less reliable
-            ui.run_javascript(
-                f"""
-                try {{
-                    var el = getElement({messages_container.id});
-                    if (el) {{
-                        el.scrollTop = el.scrollHeight;
-                    }}
-                }} catch (error) {{
-                    // Fallback with anchor method
-                    setTimeout(() => {{
-                        const anchor = document.getElementById('scroll-anchor');
-                        if (anchor) {{
-                            anchor.scrollIntoView({{ behavior: 'smooth', block: 'end' }});
-                            anchor.remove();
+                            console.log('Scrolled using element ID');
+                            return;
                         }}
-                    }}, 100);
-                }}
-                """, 
-                respond=False
-            )
-        except Exception:
-            # Silently fail for non-critical scroll operations
+                    }} catch (e) {{
+                        console.log('Element ID failed:', e);
+                    }}
+                    
+                    // Method 2: Find any scrollable container
+                    const containers = document.querySelectorAll('[class*="overflow-y-auto"]');
+                    for (let container of containers) {{
+                        if (container.scrollHeight > container.clientHeight) {{
+                            container.scrollTop = container.scrollHeight;
+                            console.log('Scrolled using fallback method');
+                            return;
+                        }}
+                    }}
+                    
+                    console.log('No scrollable container found');
+                }}, 150);
+            ''')
+        except Exception as e:
+            print(f"Scroll error: {e}")
             pass
 
     # --- Main UI Structure ---
@@ -253,7 +205,7 @@ async def chat_page():
             message_input.enable()
             message_input.value = ''
         update_chat_list.refresh() 
-        await scroll_messages_to_bottom()  # Use CSS-based scroll instead of async JS
+        await scroll_to_bottom()
 
     async def send_current_message():
         nonlocal messages_container, message_input, spinner # These are accessed/modified
@@ -277,7 +229,9 @@ async def chat_page():
         with messages_container:
             with ui.element('div').classes('self-end bg-blue-500 text-white p-3 rounded-lg max-w-[80%]'):
                 ui.markdown(text)
-        await scroll_to_bottom_simple()  # Immediate scroll for user message
+        
+        # Small delay to ensure DOM is updated, then scroll
+        await scroll_to_bottom()
 
         if spinner: spinner.visible = True
         try:
@@ -297,8 +251,9 @@ async def chat_page():
             with messages_container:
                 with ui.element('div').classes('self-start bg-gray-200 p-3 rounded-lg max-w-[80%]'):
                     ui.markdown(assistant_response_content)
-            await scroll_to_bottom_simple()  # Immediate scroll
-            await scroll_messages_to_bottom()  # Delayed scroll for reliability
+            
+            # Small delay to ensure DOM is updated, then scroll
+            await scroll_to_bottom()
 
             if response_data.get("error") and response_data.get("error_type") == "non_critical":
                 ui.notify(f"Nota: {response_data['error']}", type='warning', timeout=5000)
@@ -311,7 +266,7 @@ async def chat_page():
             with messages_container:
                  with ui.element('div').classes('self-start bg-red-100 text-red-700 p-3 rounded-lg max-w-[80%] border-l-4 border-red-500'):
                     ui.markdown(f"**⚠️ Error del Sistema**\n\nNo se pudo obtener respuesta: {e}")
-            await scroll_messages_to_bottom()
+            await scroll_to_bottom()
         finally:
             if spinner: spinner.visible = False
 
