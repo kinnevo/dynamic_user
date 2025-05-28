@@ -19,11 +19,22 @@ def home():
 
     if current_user_details and current_user_details.get('email'):
         user_email = current_user_details['email']
-        # Update user status to Active when they visit home, identified by email
-        # Or set to "Idle" if that was the previous logic's intent upon some condition.
-        # For now, let's assume visiting home means they are active.
-        db_adapter.update_user_status(identifier=user_email, status="Active", is_email=True)
-        print(f"User {user_email} status updated to Active on home page visit.")
+        firebase_uid = current_user_details.get('uid')
+        display_name = current_user_details.get('displayName')
+        
+        # Ensure user exists in database with Firebase UID and display name
+        user_id = db_adapter.get_or_create_user_by_email(
+            email=user_email,
+            firebase_uid=firebase_uid,
+            display_name=display_name
+        )
+        
+        if user_id:
+            print(f"User {user_email} (UID: {firebase_uid}) ensured in database with ID: {user_id}")
+            # Update user status to Active when they visit home
+            db_adapter.update_user_status(identifier=user_email, status="Active", is_email=True)
+        else:
+            print(f"Failed to ensure user {user_email} in database")
     else:
         # This case should ideally not be reached due to @auth_required
         # but as a fallback or if auth_required logic changes:

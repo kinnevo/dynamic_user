@@ -8,6 +8,7 @@ import os
 from datetime import datetime
 import asyncio
 import aiofiles
+import time
 
 class MessageRouter:
     """
@@ -65,8 +66,8 @@ class MessageRouter:
             # Update user status to Active (identified by email)
             self.db_adapter.update_user_status(identifier=user_email, status="Active", is_email=True)
             
-            # Send to FILC Agent API
-            # Note: filc_client.process_message might also need to be updated if it expects an old session_id model
+            # Send to FILC Agent API and track processing time
+            start_time = time.time()
             # print(f"MessageRouter: Calling FilcAgentClient.process_message for chat {session_id}")
             response_from_agent = await self.filc_client.process_message(
                 message=message,
@@ -74,13 +75,14 @@ class MessageRouter:
                 history=history
                 # Potentially pass user_email or a user identifier if filc_client needs it
             )
+            processing_time_ms = int((time.time() - start_time) * 1000)  # Convert to milliseconds
             # print(f"MessageRouter: Received response from agent: {json.dumps(response_from_agent, indent=2)}")
             
             # Extract response text
             response_text = self._extract_response_text(response_from_agent)
             # print(f"MessageRouter: Extracted response text: '{response_text}'")
             
-            # Save assistant response to database with Firebase UID
+            # Save assistant response to database with Firebase UID and processing time
             if response_text:
                 assistant_message_id = self.db_adapter.save_message(
                     user_email=user_email,
@@ -88,7 +90,9 @@ class MessageRouter:
                     content=response_text,
                     role="assistant",
                     firebase_uid=firebase_uid,
-                    display_name=display_name
+                    display_name=display_name,
+                    model_used="FILC Agent",  # Specify the model used
+                    processing_time=processing_time_ms
                 )
                 # print(f"MessageRouter: Assistant response saved with ID: {assistant_message_id}")
             else:
