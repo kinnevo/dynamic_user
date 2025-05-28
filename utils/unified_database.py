@@ -294,7 +294,7 @@ class UnifiedDatabaseAdapter(DatabaseInterface):
             if conn: 
                 self.connection_pool.putconn(conn)
 
-    def save_message(self, user_email: str, session_id: str, content: str, role: str, model_used: str = None, firebase_uid: str = None, display_name: str = None) -> Optional[int]:
+    def save_message(self, user_email: str, session_id: str, content: str, role: str, model_used: str = None, firebase_uid: str = None, display_name: str = None, token_count: int = None, processing_time: int = None) -> Optional[int]:
         """
         Save a message to the database.
         
@@ -306,6 +306,8 @@ class UnifiedDatabaseAdapter(DatabaseInterface):
             model_used: AI model used (for assistant messages)
             firebase_uid: Firebase User ID (optional, recommended)
             display_name: User's display name (optional)
+            token_count: Number of tokens in the message (optional)
+            processing_time: Time taken to process in milliseconds (optional)
             
         Returns:
             message_id if successful, None otherwise
@@ -350,11 +352,11 @@ class UnifiedDatabaseAdapter(DatabaseInterface):
                 
                 message_order = message_count + 1
                 
-                # Insert message
+                # Insert message with all metadata
                 cursor.execute(
-                    """INSERT INTO messages (conversation_id, user_id, content, role, created_at, message_order, model_used) 
-                       VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",
-                    (conversation_id, user_id, content, role, get_sf_time(), message_order, model_used)
+                    """INSERT INTO messages (conversation_id, user_id, content, role, created_at, message_order, model_used, token_count, processing_time) 
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+                    (conversation_id, user_id, content, role, get_sf_time(), message_order, model_used, token_count, processing_time)
                 )
                 message_id = cursor.fetchone()[0]
                 
@@ -408,7 +410,7 @@ class UnifiedDatabaseAdapter(DatabaseInterface):
                     {
                         "role": row["role"],
                         "content": row["content"],
-                        "timestamp": row["created_at"]
+                        "timestamp": row["created_at"].isoformat() if row["created_at"] else None
                     }
                     for row in rows
                 ]
@@ -460,7 +462,18 @@ class UnifiedDatabaseAdapter(DatabaseInterface):
                     (user_id,)
                 )
                 rows = cursor.fetchall()
-                return [dict(row) for row in rows]
+                
+                # Convert datetime objects to ISO strings for JSON serialization
+                sessions = []
+                for row in rows:
+                    session_dict = dict(row)
+                    if session_dict['last_message_timestamp']:
+                        session_dict['last_message_timestamp'] = session_dict['last_message_timestamp'].isoformat()
+                    if session_dict['created_at']:
+                        session_dict['created_at'] = session_dict['created_at'].isoformat()
+                    sessions.append(session_dict)
+                
+                return sessions
                 
         except Exception as e:
             print(f"❌ Error getting chat sessions for user: {e}")
@@ -513,4 +526,58 @@ class UnifiedDatabaseAdapter(DatabaseInterface):
         print("⚠️ Warning: get_user with session_id is deprecated. Use get_user_by_email instead.")
         # Try to find user by fake email based on session_id
         fake_email = f"session_{session_id}@deprecated.local"
-        return self.get_user_by_email(fake_email) 
+        return self.get_user_by_email(fake_email)
+
+    def update_message_metadata(self, message_id: int, token_count: int = None, processing_time: int = None, model_used: str = None) -> bool:
+        """
+        Update message metadata after processing.
+        
+        Args:
+            message_id: ID of the message to update
+            token_count: Number of tokens in the message
+            processing_time: Time taken to process in milliseconds
+            model_used: AI model used
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        conn = self.connection_pool.getconn()
+        try:
+            with conn.cursor() as cursor:
+                update_parts = []
+                update_values = []
+                
+                if token_count is not None:
+                    update_parts.append("token_count = %s")
+                    update_values.append(token_count)
+                
+                if processing_time is not None:
+                    update_parts.append("processing_time = %s")
+                    update_values.append(processing_time)
+                
+                if model_used is not None:
+                    update_parts.append("model_used = %s")
+                    update_values.append(model_used)
+                
+                if update_parts:
+                    update_values.append(message_id)
+                    cursor.execute(
+                        f"UPDATE messages SET {', '.join(update_parts)} WHERE id = %s",
+                        update_values
+                    )
+                    success = cursor.rowcount > 0
+                    conn.commit()
+                    print(f"✅ Updated message {message_id} metadata")
+                    return success
+                else:
+                    print("⚠️ No metadata to update")
+                    return True
+                    
+        except Exception as e:
+            print(f"❌ Error updating message metadata: {e}")
+            if conn: 
+                conn.rollback()
+            return False
+        finally:
+            if conn: 
+                self.connection_pool.putconn(conn) 

@@ -1,5 +1,6 @@
 from nicegui import app, ui
 from utils.firebase_auth import FirebaseAuth
+from utils.unified_database import UnifiedDatabaseAdapter
 from functools import wraps
 import inspect # Import inspect module
 
@@ -54,6 +55,28 @@ def auth_required(page_function):
             print(f"Auth middleware: Exception during token check for {user_email}: {e}. Redirecting to login.")
             FirebaseAuth.logout_user()
             return ui.navigate.to('/login')
+        
+        # Ensure user exists in database with Firebase UID
+        try:
+            firebase_uid = current_user_details.get('uid')
+            display_name = current_user_details.get('displayName')
+            
+            if firebase_uid:
+                db_adapter = UnifiedDatabaseAdapter()
+                user_id = db_adapter.get_or_create_user_by_email(
+                    email=user_email,
+                    firebase_uid=firebase_uid,
+                    display_name=display_name
+                )
+                if user_id:
+                    print(f"Auth middleware: User {user_email} ensured in database with Firebase UID {firebase_uid}")
+                else:
+                    print(f"Auth middleware: Warning - Failed to ensure user {user_email} in database")
+            else:
+                print(f"Auth middleware: Warning - No Firebase UID available for user {user_email}")
+        except Exception as e:
+            print(f"Auth middleware: Error ensuring user in database: {e}")
+            # Don't fail authentication for database issues
         
         print(f"Auth middleware: Authentication successful for {user_email}, proceeding to protected page.")
         
