@@ -68,7 +68,7 @@ async def chat_page():
                         else: # assistant
                             with ui.element('div').classes('self-start bg-gray-200 p-3 rounded-lg max-w-[80%]'):
                                 ui.markdown(message['content'])
-            await scroll_messages_to_bottom()
+            scroll_to_bottom_css()  # Use CSS-based scroll instead of async JS
             if message_input: message_input.enable()
         except Exception as e:
             print(f"Error loading chat history for {chat_id}: {e}")
@@ -82,11 +82,60 @@ async def chat_page():
 
     async def scroll_messages_to_bottom():
         nonlocal messages_container
-        if not messages_container: return
+        if not messages_container: 
+            return
+        
         try:
-            await ui.run_javascript(f'var el = getElement({messages_container.id}); if (el) el.scrollTop = el.scrollHeight;', timeout=1.0)
+            # Use a more robust JavaScript approach with longer timeout
+            # and better error handling
+            await ui.run_javascript(
+                f"""
+                try {{
+                    var el = getElement({messages_container.id});
+                    if (el) {{
+                        el.scrollTop = el.scrollHeight;
+                    }}
+                }} catch (error) {{
+                    console.log('Scroll error:', error);
+                }}
+                """, 
+                timeout=3.0  # Increased timeout
+            )
+        except asyncio.TimeoutError:
+            # Don't print error for timeout - it's not critical
+            pass
         except Exception as e:
-            print(f"Error scrolling chat: {e}")
+            # Only log other types of errors
+            if "KeyError" not in str(e):
+                print(f"Non-critical scroll error: {e}")
+
+    # Alternative scroll method using CSS-based approach
+    def scroll_to_bottom_css():
+        nonlocal messages_container
+        if not messages_container:
+            return
+        
+        try:
+            # Add a scroll-trigger element at the bottom
+            with messages_container:
+                ui.element('div').props('id="scroll-anchor"').style('height: 1px;')
+            
+            # Use CSS scroll behavior instead of JavaScript
+            ui.run_javascript(
+                """
+                setTimeout(() => {
+                    const anchor = document.getElementById('scroll-anchor');
+                    if (anchor) {
+                        anchor.scrollIntoView({ behavior: 'smooth', block: 'end' });
+                        anchor.remove();
+                    }
+                }, 100);
+                """, 
+                respond=False  # Don't wait for response
+            )
+        except Exception:
+            # Silently fail for non-critical scroll operations
+            pass
 
     # --- Main UI Structure ---
     # Sidebar for chat sessions
@@ -174,7 +223,7 @@ async def chat_page():
             message_input.enable()
             message_input.value = ''
         update_chat_list.refresh() 
-        await scroll_messages_to_bottom()
+        scroll_to_bottom_css()  # Use CSS-based scroll instead of async JS
 
     async def send_current_message():
         nonlocal messages_container, message_input, spinner # These are accessed/modified
@@ -198,7 +247,7 @@ async def chat_page():
         with messages_container:
             with ui.element('div').classes('self-end bg-blue-500 text-white p-3 rounded-lg max-w-[80%]'):
                 ui.markdown(text)
-        await scroll_messages_to_bottom()
+        scroll_to_bottom_css()  # Use CSS-based scroll instead of async JS
 
         if spinner: spinner.visible = True
         try:
@@ -218,7 +267,7 @@ async def chat_page():
             with messages_container:
                 with ui.element('div').classes('self-start bg-gray-200 p-3 rounded-lg max-w-[80%]'):
                     ui.markdown(assistant_response_content)
-            await scroll_messages_to_bottom()
+            scroll_to_bottom_css()  # Use CSS-based scroll instead of async JS
 
             if response_data.get("error") and response_data.get("error_type") == "non_critical":
                 ui.notify(f"Nota: {response_data['error']}", type='warning', timeout=5000)
@@ -231,7 +280,7 @@ async def chat_page():
             with messages_container:
                  with ui.element('div').classes('self-start bg-red-100 text-red-700 p-3 rounded-lg max-w-[80%] border-l-4 border-red-500'):
                     ui.markdown(f"**⚠️ Error del Sistema**\n\nNo se pudo obtener respuesta: {e}")
-            await scroll_messages_to_bottom()
+            scroll_to_bottom_css()
         finally:
             if spinner: spinner.visible = False
 
