@@ -1,7 +1,7 @@
 from nicegui import ui, app
 import os
 from dotenv import load_dotenv
-from utils.database import PostgresAdapter
+from utils.unified_database import UnifiedDatabaseAdapter
 from utils.filc_agent_client import FilcAgentClient
 from utils.message_router import MessageRouter
 from utils.firebase_auth import FirebaseAuth
@@ -20,7 +20,7 @@ if os.path.exists('.env'):
 
 # Initialize database adapter and service components
 # The database adapter is also initialized in home.py for user session tracking
-db_adapter = PostgresAdapter()
+db_adapter = UnifiedDatabaseAdapter()
 filc_client = FilcAgentClient()
 message_router = MessageRouter()
 

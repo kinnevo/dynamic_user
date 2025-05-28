@@ -1,7 +1,12 @@
 from typing import Dict, Any, List, Optional
 import json
 from utils.filc_agent_client import FilcAgentClient
-from utils.database import PostgresAdapter
+from utils.unified_database import UnifiedDatabaseAdapter
+import openai
+import os
+from datetime import datetime
+import asyncio
+import aiofiles
 
 class MessageRouter:
     """
@@ -11,7 +16,7 @@ class MessageRouter:
     """
     def __init__(self):
         self.filc_client = FilcAgentClient()
-        self.db_adapter = PostgresAdapter()
+        self.db_adapter = UnifiedDatabaseAdapter()
     
     async def process_user_message(self, 
                                  message: str, 

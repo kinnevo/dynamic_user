@@ -2,7 +2,7 @@ from nicegui import ui, app
 import uuid
 from utils.message_router import MessageRouter
 from utils.layouts import create_navigation_menu_2
-from utils.database import PostgresAdapter
+from utils.unified_database import UnifiedDatabaseAdapter
 from utils.auth_middleware import auth_required
 from datetime import datetime
 import asyncio
@@ -10,7 +10,7 @@ from typing import Optional # Added for type hinting
 
 # Initialize components
 message_router = MessageRouter()
-db_adapter = PostgresAdapter()
+db_adapter = UnifiedDatabaseAdapter()
 
 @ui.page('/chat')
 @auth_required
