@@ -221,7 +221,7 @@ def reportes_page():
                     ui.timer(1.0, generate_wordcloud, once=True)
                 
             with ui.tab_panel('Otros Reportes'):
-                ui.label('Aquí puedes agregar otros tipos de reportes').classes('text-h6 q-mt-md')
+                ui.label('Espera pronto más reportes para ti.').classes('text-h6 q-mt-md')
                 
                 # Example of other potential reports
                 with ui.card().classes('w-full p-4 mt-4'):
