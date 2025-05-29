@@ -1,7 +1,7 @@
 from nicegui import ui, app
 import os
 from dotenv import load_dotenv
-from utils.unified_database import UnifiedDatabaseAdapter
+from utils.database_singleton import get_db
 from utils.filc_agent_client import FilcAgentClient
 from utils.message_router import MessageRouter
 from utils.firebase_auth import FirebaseAuth
@@ -18,17 +18,17 @@ from pages.reset_password import reset_password_page
 if os.path.exists('.env'):
     load_dotenv()
 
-# Initialize database adapter and service components
-# The database adapter is also initialized in home.py for user session tracking
-db_adapter = UnifiedDatabaseAdapter()
-filc_client = FilcAgentClient()
-message_router = MessageRouter()
+# Initialize service components using singleton database
+# Note: These are no longer needed at module level since they're instantiated locally where needed
+# filc_client = FilcAgentClient()
+# message_router = MessageRouter()
 
 @app.on_startup
 def on_startup():
     """Application startup handler"""
     print("Starting up...")
-    # Initialize database connection
+    # Initialize database connection using singleton
+    db_adapter = get_db()
     db_adapter._init_db()
 
 

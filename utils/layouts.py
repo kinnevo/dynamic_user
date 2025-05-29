@@ -1,6 +1,7 @@
+from utils.database_singleton import get_db
 from nicegui import ui, app
-from utils.unified_database import UnifiedDatabaseAdapter
 from utils.firebase_auth import FirebaseAuth
+from utils.auth_middleware import get_user_display_name
 from datetime import datetime, timedelta
 import pytz
 
@@ -167,7 +168,7 @@ def create_user_selector(container=None, width='w-1/3'):
     Returns:
         Tuple of (user_select, refresh_function)
     """
-    user_db = UnifiedDatabaseAdapter()
+    user_db = get_db()
     
     if container is None:
         container = ui

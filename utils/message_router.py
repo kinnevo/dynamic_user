@@ -9,6 +9,7 @@ from datetime import datetime
 import asyncio
 import aiofiles
 import time
+from utils.database_singleton import get_db
 
 class MessageRouter:
     """
@@ -17,8 +18,11 @@ class MessageRouter:
     Assumes user is identified by email and chats by session_id.
     """
     def __init__(self):
+        # Use singleton database instance
+        self.db_adapter = get_db()
+        
+        # Initialize AI clients
         self.filc_client = FilcAgentClient()
-        self.db_adapter = UnifiedDatabaseAdapter()
     
     async def process_user_message(self, 
                                  message: str, 
@@ -124,7 +128,7 @@ class MessageRouter:
         """
         Extract text from FILC Agent API response.
         """
-        print(f"MessageRouter._extract_response_text: Analyzing agent response: {json.dumps(response, indent=2)}")
+        # print(f"MessageRouter._extract_response_text: Analyzing agent response: {json.dumps(response, indent=2)}")
         if not isinstance(response, dict):
             print(f"Warning: Agent response is not a dict: {response}")
             return str(response) # Or handle more gracefully
