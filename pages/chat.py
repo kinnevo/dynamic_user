@@ -2,21 +2,25 @@ from nicegui import ui, app
 import uuid
 from utils.message_router import MessageRouter
 from utils.layouts import create_navigation_menu_2
-from utils.unified_database import UnifiedDatabaseAdapter
+from utils.database_singleton import get_db
 from utils.auth_middleware import auth_required
 from datetime import datetime
 import asyncio
 from typing import Optional # Added for type hinting
 
-# Initialize components
-message_router = MessageRouter()
-db_adapter = UnifiedDatabaseAdapter()
+# Initialize components - moved inside function to avoid module-level database initialization
+# message_router = MessageRouter()
+# db_adapter = get_db()  # Use singleton instance
 
 @ui.page('/chat')
 @auth_required
 async def chat_page():
     """Chat interface with sidebar for managing multiple chat sessions."""
     create_navigation_menu_2()
+    
+    # Initialize components inside function to avoid module-level database calls
+    message_router = MessageRouter()
+    db_adapter = get_db()  # Use singleton instance
     
     # --- UI Element Variables (defined early for access in helpers) ---
     messages_container: Optional[ui.column] = None

@@ -1,90 +1,113 @@
-from nicegui import app, ui
+import firebase_admin
+from utils.database_singleton import get_db
 from utils.firebase_auth import FirebaseAuth
-from utils.unified_database import UnifiedDatabaseAdapter
+from nicegui import ui, app
 from functools import wraps
-import inspect # Import inspect module
+import json
+import inspect
 
-def auth_required(page_function):
+def auth_required(func):
     """
-    Decorator to enforce authentication for protected pages.
-    Redirects to login page if user is not authenticated or token is invalid/expired.
-    Relies on app.storage.user holding 'user_email' and 'firebase_user_data'.
+    Decorator that requires authentication for accessing pages.
+    Checks Firebase token validity and ensures user exists in database.
     """
-    @wraps(page_function)
-    async def wrapper(*args, **kwargs): # Changed to async def
-        FirebaseAuth._ensure_user_storage() # Ensure app.storage.user exists
-            
-        current_user_details = FirebaseAuth.get_current_user()
+    @wraps(func)
+    async def wrapper(*args, **kwargs):
+        # Check if user is logged in
+        current_user_email = app.storage.user.get('user_email')
+        firebase_user_data = app.storage.user.get('firebase_user_data')
         
-        if not current_user_details or not current_user_details.get('email') or not current_user_details.get('idToken'):
-            print(f"Auth middleware: No authenticated user found (missing email or idToken), redirecting to login.")
-            return ui.navigate.to('/login')
+        if not current_user_email or not firebase_user_data:
+            print("No current user data (email or firebase_user_data) in session.")
+            ui.navigate.to('/login')
+            return
         
-        user_email = current_user_details['email']
-        id_token = current_user_details['idToken']
+        print(f"Current user retrieved from session: {current_user_email}")
+        
+        # Try to verify the current token
+        id_token = app.storage.user.get('id_token')
+        if not id_token:
+            print("No ID token found in session.")
+            ui.navigate.to('/login')
+            return
         
         try:
-            print(f"Auth middleware: User {user_email} authenticated, verifying token...")
-            verification = FirebaseAuth.verify_token(id_token)
+            print(f"Auth middleware: User {current_user_email} authenticated, verifying token...")
             
-            if not verification['success']:
-                print(f"Auth middleware: Token verification failed for {user_email}. Attempting refresh.")
-                refresh_token = current_user_details.get('refreshToken')
-                
-                if refresh_token:
-                    refresh_result = FirebaseAuth.refresh_token(refresh_token)
-                    if refresh_result['success'] and refresh_result.get('user'):
-                        # Update stored firebase_user_data with new tokens
-                        app.storage.user['firebase_user_data'] = refresh_result['user']
-                        # Email should remain the same, but good to re-affirm if present in refresh_result['user']
-                        if refresh_result['user'].get('email'):
-                           app.storage.user['user_email'] = refresh_result['user'].get('email') 
-                        print(f"Auth middleware: Token refreshed successfully for {user_email}.")
+            # Verify the Firebase ID token
+            decoded_token = firebase_admin.auth.verify_id_token(id_token)
+            firebase_uid = decoded_token['uid']
+            
+            print(f"Auth middleware: Token verified successfully for {current_user_email}")
+            
+        except firebase_admin.auth.ExpiredIdTokenError:
+            print(f"Error verifying token: Token expired")
+            print(f"Auth middleware: Token verification failed for {current_user_email}. Attempting refresh.")
+            
+            # Try to refresh the token
+            refresh_token = app.storage.user.get('refresh_token')
+            if refresh_token:
+                try:
+                    print("Attempting to refresh token")
+                    # Refresh the token using Firebase REST API
+                    import requests
+                    import os
+                    
+                    refresh_url = f"https://securetoken.googleapis.com/v1/token?key={os.getenv('FIREBASE_API_KEY')}"
+                    refresh_data = {
+                        "grant_type": "refresh_token",
+                        "refresh_token": refresh_token
+                    }
+                    
+                    response = requests.post(refresh_url, data=refresh_data)
+                    if response.status_code == 200:
+                        new_tokens = response.json()
+                        app.storage.user['id_token'] = new_tokens['id_token']
+                        app.storage.user['refresh_token'] = new_tokens['refresh_token']
+                        
+                        # Verify the new token
+                        decoded_token = firebase_admin.auth.verify_id_token(new_tokens['id_token'])
+                        firebase_uid = decoded_token['uid']
+                        
+                        print("Token refreshed successfully")
+                        print(f"Auth middleware: Token refreshed successfully for {current_user_email}.")
                     else:
-                        print(f"Auth middleware: Token refresh failed for {user_email}. Error: {refresh_result.get('error')}. Redirecting to login.")
-                        FirebaseAuth.logout_user() # Clear potentially corrupted session data
-                        return ui.navigate.to('/login')
-                else:
-                    print(f"Auth middleware: No refresh token available for {user_email}. Redirecting to login.")
-                    FirebaseAuth.logout_user()
-                    return ui.navigate.to('/login')
+                        print(f"Failed to refresh token: {response.status_code}")
+                        ui.navigate.to('/login')
+                        return
+                        
+                except Exception as refresh_error:
+                    print(f"Error refreshing token: {refresh_error}")
+                    ui.navigate.to('/login')
+                    return
             else:
-                print(f"Auth middleware: Token for {user_email} verified successfully (UID: {verification.get('uid')}).")
-
+                print("No refresh token available")
+                ui.navigate.to('/login')
+                return
+                
         except Exception as e:
-            print(f"Auth middleware: Exception during token check for {user_email}: {e}. Redirecting to login.")
-            FirebaseAuth.logout_user()
-            return ui.navigate.to('/login')
+            print(f"Error verifying token: {e}")
+            ui.navigate.to('/login')
+            return
         
-        # Ensure user exists in database with Firebase UID
-        try:
-            firebase_uid = current_user_details.get('uid')
-            display_name = current_user_details.get('displayName')
-            
-            if firebase_uid:
-                db_adapter = UnifiedDatabaseAdapter()
-                user_id = db_adapter.get_or_create_user_by_email(
-                    email=user_email,
-                    firebase_uid=firebase_uid,
-                    display_name=display_name
-                )
-                if user_id:
-                    print(f"Auth middleware: User {user_email} ensured in database with Firebase UID {firebase_uid}")
-                else:
-                    print(f"Auth middleware: Warning - Failed to ensure user {user_email} in database")
-            else:
-                print(f"Auth middleware: Warning - No Firebase UID available for user {user_email}")
-        except Exception as e:
-            print(f"Auth middleware: Error ensuring user in database: {e}")
-            # Don't fail authentication for database issues
+        # Ensure user exists in database using singleton instance
+        db_adapter = get_db()
+        user_id = db_adapter.get_or_create_user_by_email(
+            email=current_user_email,
+            firebase_uid=firebase_uid,
+            display_name=firebase_user_data.get('displayName', current_user_email.split('@')[0])
+        )
         
-        print(f"Auth middleware: Authentication successful for {user_email}, proceeding to protected page.")
+        if user_id:
+            print(f"Auth middleware: User {current_user_email} ensured in database with Firebase UID {firebase_uid}")
+        
+        print(f"Auth middleware: Authentication successful for {current_user_email}, proceeding to protected page.")
         
         # Await the page_function if it's a coroutine
-        if inspect.iscoroutinefunction(page_function):
-            return await page_function(*args, **kwargs)
+        if inspect.iscoroutinefunction(func):
+            return await func(*args, **kwargs)
         else:
-            return page_function(*args, **kwargs)
+            return func(*args, **kwargs)
     
     return wrapper
 

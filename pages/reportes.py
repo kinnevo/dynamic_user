@@ -1,9 +1,14 @@
 from nicegui import ui, app
+from utils.database_singleton import get_db
 from utils.layouts import create_navigation_menu_2
-from utils.unified_database import UnifiedDatabaseAdapter
-from utils.auth_middleware import auth_required
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import plotly.express as px
 from wordcloud import WordCloud
+import pandas as pd
+from collections import Counter
+import re
+from utils.auth_middleware import auth_required
 import nltk
 import numpy as np
 from nltk.corpus import stopwords
@@ -15,11 +20,16 @@ try:
 except LookupError:
     nltk.download('stopwords')
 
+# Use singleton database adapter - moved inside function to avoid module-level initialization
+# db_adapter = get_db()
+
 @ui.page('/reportes')
 @auth_required
 def reportes_page():
+    # Initialize database adapter inside function
+    db_adapter = get_db()
+    
     create_navigation_menu_2()
-    db_adapter = UnifiedDatabaseAdapter()
 
     with ui.column().classes('w-full p-4'):
         ui.label('Reportes y Administración').classes('text-h4 q-mb-md')

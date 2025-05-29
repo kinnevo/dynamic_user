@@ -1,18 +1,20 @@
 from nicegui import ui, app
 # import uuid # No longer needed for session_id generation here
 # from utils.state import logout, set_user_logout_state # logout flag and set_user_logout_state might be re-evaluated
-from utils.unified_database import UnifiedDatabaseAdapter
-from utils.layouts import create_navigation_menu_2 # Assuming this is still used for nav bar
+from utils.layouts import create_navigation_menu_2
+from utils.database_singleton import get_db
 from utils.firebase_auth import FirebaseAuth
 from utils.auth_middleware import get_user_display_name, auth_required
 
-# Initialize database adapter
-db_adapter = UnifiedDatabaseAdapter()
-
 @ui.page('/home')
 @auth_required
-def home():
-    # create_navigation_menu_2() # Removed as per user request
+async def home():
+    """Home page with user tracking and navigation"""
+    # Initialize the navigation menu
+    create_navigation_menu_2()
+    
+    # Use singleton database adapter for user tracking - moved inside function
+    db_adapter = get_db()
 
     # Get current authenticated user
     current_user_details = FirebaseAuth.get_current_user()
