@@ -1,0 +1,46 @@
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+README.md
+*.md
+
+# Test files
+tests/
+test_*.py
+*_test.py
+
+# Environment files (will be set via Cloud Run environment variables)
+.env
+env.example
+
+# Local development files
+.nicegui/
+
+# Cloud SQL Proxy binary
+cloud-sql-proxy
+
+# Other unnecessary files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log 
