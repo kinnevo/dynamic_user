@@ -18,8 +18,8 @@ RUN pip install uv
 # Copy requirements first for better Docker layer caching
 COPY requirements.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies with uv
+RUN uv pip install --no-cache-dir -r requirements.txt --system
 
 # Copy the entire application
 COPY . .

@@ -3,7 +3,6 @@ import json
 from utils.filc_agent_client import FilcAgentClient
 from utils.unified_database import UnifiedDatabaseAdapter
 from utils.firebase_auth import FirebaseAuth
-import openai
 import os
 from datetime import datetime
 import asyncio
