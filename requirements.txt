@@ -1,31 +1,45 @@
-nicegui==2.15.0
-requests==2.32.3
-python-dotenv==1.1.0
-psycopg2-binary==2.9.10
+nicegui>=1.4.0
+requests>=2.31.0
 
-# Python package management
-setuptools==80.3.1
+# Authentication
+passlib[bcrypt]
+pyrebase4>=4.7.1
+firebase-admin>=6.2.0
 
-# Time zone support
-pytz==2025.2
+# Database
+psycopg2-binary>=2.9.9
+asyncpg>=0.28.0
 
-# Firebase authentication
-pyrebase4==4.8.0
-firebase-admin==6.8.0
+# Environment variables
+python-dotenv>=1.0.0
 
-# Password hashing
-bcrypt==4.3.0
+# Async support
+aiohttp>=3.8.5
 
-# AI and Language Models
-openai==1.75.0
+# Date/time handling
+python-dateutil>=2.8.2
+pytz>=2023.3
 
-# Data processing
-pandas==2.2.3
-plotly==6.0.1
-wordcloud==1.9.4
+# JSON handling
+ujson>=5.8.0
+pandas>=2.1.0
 
-# Async file operations
-aiofiles==24.1.0
+# Data visualization
+wordcloud>=1.8.1
+nltk>=3.8.1
+plotly>=6.0.1
 
-# Async HTTP client
-aiohttp==3.11.17 
+# # AI and Language Models
+# openai>=1.6.0
+# langchain>=0.3.15
+# langchain-openai>=0.2.14
+# langchain-anthropic>=0.3.5
+# langchain-core>=0.3.33
+# pydantic>=2.0.0
+# markdown>=3.4.1
+
+# Google Cloud SQL support
+cloud-sql-python-connector>=1.11.0
+
+# General tools 
+setuptools>=80.3.1
