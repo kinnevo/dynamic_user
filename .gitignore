@@ -46,3 +46,7 @@ code-examples/
 # Claude md comments
 integration_plan.md
 LANGFLOW_INTEGRATION.md
+
+
+# Service account
+firebase-serviceaccount.json
