@@ -53,6 +53,10 @@ def index():
         # User is not logged in, redirect to login page
         return ui.navigate.to('/login')
 
-# Use a fixed secret key for development
-secret_key = 'development_secret_key_1234567890'
-ui.run(title='FastInnovation 1.2', port=8080, favicon='static/favicon.png', storage_secret=secret_key) 
+# Get port from environment variable (Cloud Run sets PORT)
+port = int(os.environ.get('PORT', 8080))
+
+# Get secret key from environment variable or use a default for development
+secret_key = os.environ.get('STORAGE_SECRET', 'development_secret_key_1234567890')
+
+ui.run(title='FastInnovation 1.2', port=port, favicon='static/favicon.png', storage_secret=secret_key) 
