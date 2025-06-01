@@ -77,7 +77,12 @@ def login_page():
                     app.storage.user['firebase_user_data'] = firebase_user_obj 
                     app.storage.user['active_chat_id'] = None # Initialize active chat ID
                     
+                    # Store tokens for auth middleware
+                    app.storage.user['id_token'] = firebase_user_obj.get('idToken')
+                    app.storage.user['refresh_token'] = firebase_user_obj.get('refreshToken')
+                    
                     print(f"Stored in app.storage.user after login: user_email='{app.storage.user['user_email']}', active_chat_id={app.storage.user['active_chat_id']}")
+                    print(f"Tokens stored: id_token={'[SET]' if app.storage.user.get('id_token') else '[MISSING]'}, refresh_token={'[SET]' if app.storage.user.get('refresh_token') else '[MISSING]'}")
                     
                     # Show success message
                     success_label.text = '¡Inicio de sesión exitoso!'
