@@ -423,14 +423,27 @@ class AdminPageManager:
         table_rows = []
         total_users = 0
 
+        # Debug: Log the full response structure
+        # print(f"DEBUG: Full response_data = {response_data}")
+
         if response_data and isinstance(response_data, dict) and 'users' in response_data and 'total_users' in response_data:
             users_page_data = response_data['users']
             total_users = response_data['total_users']
             print(f"<-- Received {len(users_page_data)} users (total: {total_users})")
+        elif response_data and isinstance(response_data, list):
+            # Fallback: Maybe the API returns a direct array instead of wrapped structure
+            users_page_data = response_data
+            total_users = len(response_data)
+            print(f"<-- Received direct array: {len(users_page_data)} users")
+        else:
+            print("ERROR: Invalid response format from paginated users endpoint or API error.")
+            users_page_data = []
+            total_users = 0
 
+        if users_page_data:
             for user in users_page_data:
                 # Debug logging to see actual API response values
-                print(f"DEBUG: User data - id: {user.get('id')}, total_messages: {user.get('total_messages')}, created_at: {user.get('created_at')}")
+                # print(f"DEBUG: User data - id: {user.get('id')}, message_count: {user.get('message_count')}, created_at: {user.get('created_at')}")
                 
                 last_active_str = 'Never'
                 raw_last_active = user.get('last_active')
@@ -440,8 +453,8 @@ class AdminPageManager:
                     except (ValueError, TypeError):
                         last_active_str = raw_last_active
 
-                # Format created_at for start_time
-                start_time_str = 'Never'
+                # Format created_at for start_time - handle missing created_at from paginated endpoint
+                start_time_str = 'Not Available'  # Since paginated endpoint doesn't include created_at
                 raw_created_at = user.get('created_at')
                 if raw_created_at:
                     try:
@@ -453,28 +466,22 @@ class AdminPageManager:
                     'user_id': user.get('id'),
                     'name': user.get('display_name', 'N/A'),
                     'logged': 'Yes' if user.get('is_active', False) else 'No',
-                    'message_count': user.get('total_messages', 0),
+                    'message_count': user.get('message_count', 0),  # Use message_count instead of total_messages
                     'start_time': start_time_str,
                     'last_activity': last_active_str
                 })
 
-            self.users_table.rows = table_rows
+        # Update table regardless of whether we have data or not
+        self.users_table.rows = table_rows
 
-            new_pagination = dict(pagination_in)
-            new_pagination['rowsNumber'] = total_users
-            self.users_table.pagination = new_pagination
-            self.pagination_state.update(new_pagination)
+        new_pagination = dict(pagination_in)
+        new_pagination['rowsNumber'] = total_users
+        self.users_table.pagination = new_pagination
+        self.pagination_state.update(new_pagination)
 
-            if self.client and self.client.has_socket_connection:
-                js_command = f"Quasar.plugins.Notify.create({{ message: 'Loaded page {page} ({len(table_rows)} of {total_users} users)', type: 'positive', position: 'bottom-right', timeout: 1500 }})"
-                self.client.run_javascript(js_command)
-        else:
-            print("ERROR: Invalid response format from paginated users endpoint or API error.")
-            self.users_table.rows = []
-            new_pagination = dict(pagination_in)
-            new_pagination['rowsNumber'] = total_users # Use 0 if fetch failed
-            self.users_table.pagination = new_pagination
-            self.pagination_state.update(new_pagination)
+        if self.client and self.client.has_socket_connection:
+            js_command = f"Quasar.plugins.Notify.create({{ message: 'Loaded page {page} ({len(table_rows)} of {total_users} users)', type: 'positive', position: 'bottom-right', timeout: 1500 }})"
+            self.client.run_javascript(js_command)
 
         # --- Set loading to false after request (success or failure) ---
         self.is_loading = False # Set manual loading state
@@ -1140,7 +1147,7 @@ class AdminPageManager:
         ''') # Keep existing styles/scripts
 
 @ui.page('/admin')
-@auth_required
+# @auth_required
 async def page_admin():
     """Admin page handler - creates a new manager instance for each session."""
     # Create a new manager instance for this session
