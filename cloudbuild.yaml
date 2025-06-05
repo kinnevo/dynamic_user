@@ -1,0 +1,87 @@
+steps:
+  # Build the container image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: [
+      'build', 
+      '-t', 
+      'gcr.io/$PROJECT_ID/dynamic-user:$SHORT_SHA',
+      '-t',
+      'gcr.io/$PROJECT_ID/dynamic-user:latest',
+      '.'
+    ]
+
+  # Push the container image to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/dynamic-user:$SHORT_SHA']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/dynamic-user:latest']
+
+  # Deploy container image to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'dynamic-user'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/dynamic-user:$SHORT_SHA'
+      - '--region'
+      - 'us-central1'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+      - '--port'
+      - '8080'
+      - '--memory'
+      - '512Mi'
+      - '--cpu'
+      - '1'
+      - '--max-instances'
+      - '10'
+      - '--min-instances'
+      - '0'
+      - '--concurrency'
+      - '80'
+      - '--timeout'
+      - '300'
+      - '--set-env-vars'
+      - |
+        ENVIRONMENT=production,
+        PORT=8080,
+        USE_CLOUD_SQL=true,
+        CLOUD_SQL_CONNECTION_NAME=fast-innovation-460415:us-central1:fast-innovation-sandbox,
+        CLOUD_SQL_DATABASE_NAME=fastinnovation,
+        CLOUD_SQL_USERNAME=postgres,
+        POSTGRES_HOST=localhost,
+        POSTGRES_DB=fastinnovation,
+        POSTGRES_USER=appuser,
+        POSTGRES_PORT=5432,
+        FIREBASE_API_KEY=$$FIREBASE_API_KEY,
+        FIREBASE_AUTH_DOMAIN=fastinnovation-usermgmt.firebaseapp.com,
+        FIREBASE_PROJECT_ID=fastinnovation-usermgmt,
+        FIREBASE_STORAGE_BUCKET=fastinnovation-usermgmt.firebasestorage.app,
+        FIREBASE_MESSAGING_SENDER_ID=404136023675,
+        FIREBASE_APP_ID=1:404136023675:web:21c072256f07c96ea0b4de,
+        FIREBASE_MEASUREMENT_ID=G-K1VFNVLTVH,
+        ANALYTICS_API_URL=http://localhost:8000,
+        FI_ANALYTICS_API_KEY=$$FI_ANALYTICS_API_KEY
+      - '--set-secrets'
+      - |
+        CLOUD_SQL_PASSWORD=cloud-sql-password:latest,
+        POSTGRES_PASSWORD=postgres-password:latest,
+        FIREBASE_SERVICE_ACCOUNT_JSON=firebase-service-account:latest,
+        OPENAI_API_KEY=openai-api-key:latest,
+        SECRET_KEY=app-secret-key:latest,
+        STORAGE_SECRET=storage-secret-key:latest,
+        ANALYTICS_API_KEY=analytics-api-key:latest
+
+images:
+  - 'gcr.io/$PROJECT_ID/dynamic-user:$SHORT_SHA'
+  - 'gcr.io/$PROJECT_ID/dynamic-user:latest'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: 'E2_HIGHCPU_8'
+
+timeout: 1200s 

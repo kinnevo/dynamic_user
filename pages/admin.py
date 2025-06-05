@@ -95,9 +95,9 @@ async def show_user_details(user_data, client=None):
     if not isinstance(user_data, dict) or not client or not client.has_socket_connection:
         return
     
-    session_id = user_data.get('session_id', 'N/A')
-    user_id = user_data.get('user_id', 'N/A')
-    logged = user_data.get('logged', 'N/A')
+    name = user_data.get('display_name', 'N/A')
+    user_id = user_data.get('id', 'N/A')
+    logged = user_data.get('is_active', 'N/A')
     
     # Create a placeholder element to avoid the UI context issue
     placeholder_id = f"user_modal_{user_id}"
@@ -138,8 +138,8 @@ async def show_user_details(user_data, client=None):
         details.classList.add('p-4', 'w-full');
         details.innerHTML = `
             <p class="mb-2"><strong>User ID:</strong> {user_id}</p>
-            <p class="mb-2"><strong>Session ID:</strong> {session_id}</p>
-            <p class="mb-2"><strong>Logged Status:</strong> {logged}</p>
+            <p class="mb-2"><strong>Name:</strong> {name}</p>
+            <p class="mb-2"><strong>Active Status:</strong> {logged}</p>
         `;
         
         // Messages section
@@ -203,7 +203,7 @@ async def show_user_details(user_data, client=None):
     await client.run_javascript(update_js)
     
     # Fetch messages asynchronously
-    messages_data = await api_request('GET', f'/sessions/{session_id}/recent-messages', client=client, params={'limit': 20})
+    messages_data = await api_request('GET', f'/sessions/{user_id}/recent-messages', client=client, params={'limit': 20})
     
     # Format and display messages
     messages_html = ""
@@ -392,13 +392,24 @@ class AdminPageManager:
         sort_by = pagination_in.get('sortBy', 'user_id')
         descending = pagination_in.get('descending', False)
 
-        # print(f"--> Requesting paginated users: page={page}, limit={rows_per_page}, sort_by={sort_by}, descending={descending}")
+        # Map frontend column names to API sort field names
+        sort_field_mapping = {
+            'user_id': 'user_id',
+            'logged': 'is_active',
+            'message_count': 'message_count',
+            'last_activity': 'last_activity'
+        }
+        
+        # Use the mapped field name for API call
+        api_sort_by = sort_field_mapping.get(sort_by, 'user_id')
+
+        print(f"--> Requesting paginated users: page={page}, limit={rows_per_page}, sort_by={sort_by} -> {api_sort_by}, descending={descending}")
         skip = (page - 1) * rows_per_page
 
         api_params = {
             'skip': skip,
             'limit': rows_per_page,
-            'sort_by': sort_by,
+            'sort_by': api_sort_by,
             'descending': descending
         }
 
@@ -418,6 +429,9 @@ class AdminPageManager:
             print(f"<-- Received {len(users_page_data)} users (total: {total_users})")
 
             for user in users_page_data:
+                # Debug logging to see actual API response values
+                print(f"DEBUG: User data - id: {user.get('id')}, total_messages: {user.get('total_messages')}, created_at: {user.get('created_at')}")
+                
                 last_active_str = 'Never'
                 raw_last_active = user.get('last_active')
                 if raw_last_active:
@@ -426,12 +440,21 @@ class AdminPageManager:
                     except (ValueError, TypeError):
                         last_active_str = raw_last_active
 
+                # Format created_at for start_time
+                start_time_str = 'Never'
+                raw_created_at = user.get('created_at')
+                if raw_created_at:
+                    try:
+                        start_time_str = datetime.fromisoformat(raw_created_at).strftime("%Y-%m-%d %H:%M:%S")
+                    except (ValueError, TypeError):
+                        start_time_str = raw_created_at
+
                 table_rows.append({
-                    'user_id': user.get('user_id'),
-                    'session_id': user.get('session_id'),
-                    'logged': 'Yes' if user.get('logged', False) else 'No',
-                    'message_count': user.get('message_count', 0),
-                    'start_time': 'Never',
+                    'user_id': user.get('id'),
+                    'name': user.get('display_name', 'N/A'),
+                    'logged': 'Yes' if user.get('is_active', False) else 'No',
+                    'message_count': user.get('total_messages', 0),
+                    'start_time': start_time_str,
                     'last_activity': last_active_str
                 })
 
@@ -937,7 +960,7 @@ class AdminPageManager:
                         'created_at': formatted_time,
                         'logged': logged,
                         'summary': full_summary_text[:100] + '...' if len(full_summary_text) > 100 else full_summary_text,
-                        'original_summary': full_summary_text 
+                        'original_summary': full_summary_text
                     })
                 
                 ui.label(f'Displaying {len(rows)} existing summaries.').classes('text-h6 mt-4 mb-2')
@@ -1009,11 +1032,11 @@ class AdminPageManager:
 
                     users_columns = [
                          {'name': 'user_id', 'field': 'user_id', 'label': 'User ID', 'align': 'left', 'sortable': True}, # Enable sorting if API supports it
-                         {'name': 'session_id', 'field': 'session_id', 'label': 'Session ID', 'align': 'left', 'sortable': False},
-                         {'name': 'logged', 'field': 'logged', 'label': 'Logged', 'align': 'center', 'sortable': False},
+                         {'name': 'name', 'field': 'name', 'label': 'Name', 'align': 'left', 'sortable': False},
+                         {'name': 'logged', 'field': 'logged', 'label': 'Logged', 'align': 'center', 'sortable': True}, # Use is_active for sorting
                          {'name': 'message_count', 'field': 'message_count', 'label': 'Messages', 'align': 'center', 'sortable': True}, # Enable sorting
                          {'name': 'start_time', 'field': 'start_time', 'label': 'Started', 'align': 'center', 'sortable': False}, # Or True if API supports
-                         {'name': 'last_activity', 'field': 'last_activity', 'label': 'Last Activity', 'align': 'center', 'sortable': True} # Enable sorting
+                         {'name': 'last_activity', 'field': 'last_activity', 'label': 'Last Activity', 'align': 'center', 'sortable': True} # Use last_activity for sorting
                     ]
 
                     # Create the table, binding pagination to the class state
