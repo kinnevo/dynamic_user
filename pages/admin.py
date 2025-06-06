@@ -267,14 +267,18 @@ async def show_summary_details(summary_data, client=None):
     # Check if we need to fetch the full summary - if the summary key contains "..." it's likely truncated
     if '...' in summary_data.get('summary', '') and summary_id:
         # Fetch the complete summary data from the API
+        print(f"DEBUG: Fetching full summary data for ID: {summary_id}")
         full_summary_data = await api_request('GET', f'/summaries/{summary_id}', client=client)
         if full_summary_data and isinstance(full_summary_data, dict):
             # Replace our data with the complete version
             summary_data = full_summary_data
+            print(f"DEBUG: Successfully fetched full summary data")
+        else:
+            print(f"DEBUG: Failed to fetch full summary data or invalid response")
     
     # Now extract all needed fields
     user_id = summary_data.get('user_id', 'N/A')
-    session_id = summary_data.get('session_id', 'N/A')
+    conversation_id = summary_data.get('conversation_id', 'N/A')
     created_at = summary_data.get('created_at', 'N/A')
     logged = 'Yes' if summary_data.get('logged') else 'No'
     
@@ -320,7 +324,7 @@ async def show_summary_details(summary_data, client=None):
         details.innerHTML = `
             <p class="mb-2"><strong>Summary ID:</strong> {summary_id}</p>
             <p class="mb-2"><strong>User ID:</strong> {user_id}</p>
-            <p class="mb-2"><strong>Session ID:</strong> {session_id}</p>
+            <p class="mb-2"><strong>Conversation ID:</strong> {conversation_id}</p>
             <p class="mb-2"><strong>Created At:</strong> {created_at}</p>
             <p class="mb-2"><strong>Logged:</strong> {logged}</p>
             <h4 class="font-bold mt-6 mb-3 text-lg">Summary:</h4>
@@ -843,7 +847,7 @@ class AdminPageManager:
                 columns = [
                     {'name': 'summary_id', 'field': 'summary_id', 'label': 'ID', 'align': 'left'},
                     {'name': 'user_id', 'field': 'user_id', 'label': 'User ID', 'align': 'left'},
-                    {'name': 'session_id', 'field': 'session_id', 'label': 'Session ID', 'align': 'left'},
+                    {'name': 'conversation_id', 'field': 'conversation_id', 'label': 'Conversation ID', 'align': 'left'},
                     {'name': 'created_at', 'field': 'created_at', 'label': 'Created At', 'align': 'left'},
                     {'name': 'logged', 'field': 'logged', 'label': 'Logged User', 'align': 'center'},
                     {'name': 'summary', 'field': 'summary', 'label': 'Summary (Preview)', 'align': 'left'},
@@ -863,9 +867,9 @@ class AdminPageManager:
                     full_summary_text = summary_item.get('summary', '')
                     
                     rows.append({
-                        'summary_id': summary_item.get('summary_id', 'N/A'),
+                        'summary_id': summary_item.get('id', 'N/A'),
                         'user_id': summary_item.get('user_id', 'N/A'),
-                        'session_id': summary_item.get('session_id', 'N/A'),
+                        'conversation_id': summary_item.get('conversation_id', 'N/A'),
                         'created_at': formatted_time,
                         'logged': logged,
                         'summary': full_summary_text[:100] + '...' if len(full_summary_text) > 100 else full_summary_text,
@@ -940,7 +944,7 @@ class AdminPageManager:
                 columns = [
                     {'name': 'summary_id', 'field': 'summary_id', 'label': 'ID', 'align': 'left'},
                     {'name': 'user_id', 'field': 'user_id', 'label': 'User ID', 'align': 'left'},
-                    {'name': 'session_id', 'field': 'session_id', 'label': 'Session ID', 'align': 'left'},
+                    {'name': 'conversation_id', 'field': 'conversation_id', 'label': 'Conversation ID', 'align': 'left'},
                     {'name': 'created_at', 'field': 'created_at', 'label': 'Created At', 'align': 'left'},
                     {'name': 'logged', 'field': 'logged', 'label': 'Logged User', 'align': 'center'},
                     {'name': 'summary', 'field': 'summary', 'label': 'Summary (Preview)', 'align': 'left'},
@@ -961,9 +965,9 @@ class AdminPageManager:
                     full_summary_text = summary_item.get('summary', '')
                     
                     rows.append({
-                        'summary_id': summary_item.get('summary_id', 'N/A'),
+                        'summary_id': summary_item.get('id', 'N/A'),
                         'user_id': summary_item.get('user_id', 'N/A'),
-                        'session_id': summary_item.get('session_id', 'N/A'),
+                        'conversation_id': summary_item.get('conversation_id', 'N/A'),
                         'created_at': formatted_time,
                         'logged': logged,
                         'summary': full_summary_text[:100] + '...' if len(full_summary_text) > 100 else full_summary_text,
@@ -1147,7 +1151,7 @@ class AdminPageManager:
         ''') # Keep existing styles/scripts
 
 @ui.page('/admin')
-# @auth_required
+# @auth_required # TODO: Uncomment this when done debugging
 async def page_admin():
     """Admin page handler - creates a new manager instance for each session."""
     # Create a new manager instance for this session
