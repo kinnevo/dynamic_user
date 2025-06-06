@@ -531,7 +531,9 @@ class AdminPageManager:
             print("No summaries data provided or data is empty, skipping batch analysis trigger.")
             return
 
-        summary_ids = [s.get('summary_id') for s in summaries_data_list if isinstance(s, dict) and s.get('summary_id')]
+        summary_ids = [s.get('id') for s in summaries_data_list if isinstance(s, dict) and s.get('id')]
+
+        print(f"DEBUG: Extracted summary IDs: {summary_ids}")
 
         if not summary_ids:
             print("No valid summary IDs found in the provided data to trigger batch analysis.")
