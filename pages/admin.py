@@ -15,12 +15,32 @@ from utils.auth_middleware import auth_required
 from utils.layouts import create_navigation_menu_2, create_date_range_selector, create_user_selector # Re-added imports
 
 # Load environment variables
-load_dotenv()
+load_dotenv(override=True)
 
-# # API Configuration
-# API_BASE_URL = "https://fireportes-production.up.railway.app/api/v1"
-API_BASE_URL = "http://localhost:8000/api/v1/"  # for local development
+# API Configuration - Use environment variables to determine API URL
+def get_api_base_url():
+    """Get the API base URL based on environment configuration."""
+    environment = os.getenv("ENVIRONMENT", "development")
+    
+    # Strip comments and whitespace from environment variable
+    if environment:
+        environment = environment.split('#')[0].strip().lower()
+    else:
+        environment = "development"
+    
+    if environment == "production":
+        return os.getenv("ADMIN_API_URL_PRODUCTION", "https://fireportes-production.up.railway.app/api/v1")
+    else:
+        return os.getenv("ADMIN_API_URL_LOCAL", "http://localhost:8000/api/v1")
+
+API_BASE_URL = get_api_base_url()
 API_KEY = os.getenv("FI_ANALYTICS_API_KEY")
+
+print(f"Admin API Configuration:")
+print(f"  Environment: {os.getenv('ENVIRONMENT', 'development')}")
+print(f"  Parsed Environment: {os.getenv('ENVIRONMENT', 'development').split('#')[0].strip().lower() if os.getenv('ENVIRONMENT') else 'development'}")
+print(f"  API Base URL: {API_BASE_URL}")
+print(f"  API Key configured: {'Yes' if API_KEY else 'No'}")
 
 if not API_KEY:
     print("ERROR: FI_ANALYTICS_API_KEY not found in environment variables.")
