@@ -197,6 +197,42 @@ ANALYTICS_API_URL=http://localhost:8000
    - User activity tracked in database
    - Conversation threads linked to Firebase UID
 
+## 🚀 **Cloud Deployment**
+
+This application is designed for deployment on Google Cloud Run with automated setup.
+
+### **Quick Deployment**
+
+Use the automated deployment script:
+
+```bash
+# Make script executable
+chmod +x deploy-to-cloud-run.sh
+
+# Deploy to Cloud Run
+./deploy-to-cloud-run.sh
+```
+
+The script automatically:
+- Deploys to Google Cloud Run
+- Configures all environment variables
+- Sets up Cloud SQL connection
+- Grants necessary IAM permissions
+- Provides the service URL
+
+### **Service Configuration**
+- **Service Name:** `dynamic-user`
+- **Region:** `us-central1`
+- **Access:** Publicly accessible (unauthenticated)
+- **Resources:** 2Gi memory, 2 CPU cores
+- **Database:** Cloud SQL PostgreSQL with Python Connector
+
+### **Service URLs**
+- **Production:** https://dynamic-user-604277815223.us-central1.run.app
+- **Health Check:** https://dynamic-user-604277815223.us-central1.run.app/health
+
+For detailed deployment instructions, see [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md).
+
 ## Conversation Management
 
 ### Creating New Conversations
