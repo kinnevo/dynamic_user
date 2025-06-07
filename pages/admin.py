@@ -1174,7 +1174,7 @@ class AdminPageManager:
 
 @ui.page('/admin')
 # @auth_required # TODO: Uncomment this when done debugging
-async def page_admin():
+def page_admin():
     """Admin page handler - creates a new manager instance for each session."""
     # Create a new manager instance for this session
     admin_manager = AdminPageManager()
