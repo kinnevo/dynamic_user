@@ -34,10 +34,10 @@ def set_user_logout_state(value: bool):
 
 
 # User status tracking
-def update_user_status(identifier: str, status: str, is_email: bool = False):
+async def update_user_status(identifier: str, status: str, is_email: bool = False):
     """Update the status of a user in the database.
        If is_email is False, identifier is treated as a legacy session_id.
     """
-    # Get database adapter only when needed
-    db_adapter = get_db()
-    db_adapter.update_user_status(identifier, status, is_email=is_email)
+    # Get async database adapter
+    db_adapter = await get_db()
+    await db_adapter.update_user_status(identifier, status, is_email=is_email)

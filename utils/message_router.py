@@ -17,11 +17,17 @@ class MessageRouter:
     Assumes user is identified by email and chats by session_id.
     """
     def __init__(self):
-        # Use singleton database instance
-        self.db_adapter = get_db()
+        # Database adapter will be initialized async in methods
+        self.db_adapter = None
         
         # Initialize AI clients
         self.filc_client = FilcAgentClient()
+    
+    async def _get_db_adapter(self):
+        """Get the async database adapter, initializing if needed"""
+        if self.db_adapter is None:
+            self.db_adapter = await get_db()
+        return self.db_adapter
     
     async def process_user_message(self, 
                                  message: str, 
@@ -41,6 +47,9 @@ class MessageRouter:
         try:
             print(f"MessageRouter: Processing message from {user_email} for chat {session_id}: '{message[:50]}...'" ) # Log entry
             
+            # Get async database adapter
+            db_adapter = await self._get_db_adapter()
+            
             # Get current user Firebase data
             current_user = FirebaseAuth.get_current_user()
             firebase_uid = current_user.get('uid') if current_user else None
@@ -49,7 +58,7 @@ class MessageRouter:
             print(f"MessageRouter: User Firebase UID: {firebase_uid}, Display Name: {display_name}")
             
             # Save user message to database with Firebase UID and display name
-            user_message_id = self.db_adapter.save_message(
+            user_message_id = await db_adapter.save_message(
                 user_email=user_email,
                 session_id=session_id,
                 content=message,
@@ -63,11 +72,11 @@ class MessageRouter:
             # print(f"MessageRouter: User message saved with ID: {user_message_id}")
             
             # Get conversation history for context, using the session_id
-            history = self.db_adapter.get_conversation_history(session_id)
+            history = await db_adapter.get_conversation_history(session_id)
             # print(f"MessageRouter: Fetched history for chat {session_id}. Number of messages: {len(history)}")
             
             # Update user status to Active (identified by email)
-            self.db_adapter.update_user_status(identifier=user_email, status="Active", is_email=True)
+            await db_adapter.update_user_status(identifier=user_email, status="Active", is_email=True)
             
             # Send to FILC Agent API and track processing time
             start_time = time.time()
@@ -87,7 +96,7 @@ class MessageRouter:
             
             # Save assistant response to database with Firebase UID and processing time
             if response_text:
-                assistant_message_id = self.db_adapter.save_message(
+                assistant_message_id = await db_adapter.save_message(
                     user_email=user_email,
                     session_id=session_id,
                     content=response_text,
@@ -103,7 +112,7 @@ class MessageRouter:
                 print(f"No valid response text extracted from agent for chat {session_id}. Not saving assistant message.")
             
             # Update user status (e.g., "Completed" could mean completed this interaction cycle)
-            self.db_adapter.update_user_status(identifier=user_email, status="CompletedInteraction", is_email=True)
+            await db_adapter.update_user_status(identifier=user_email, status="CompletedInteraction", is_email=True)
             
             result = {
                 "content": response_text if response_text else "No response content from assistant.",
@@ -120,7 +129,11 @@ class MessageRouter:
         except Exception as e:
             print(f"MessageRouter: CRITICAL ERROR in process_user_message for {user_email}, chat {session_id}: {e}", flush=True)
             # Update user status to Failed (identified by email)
-            self.db_adapter.update_user_status(identifier=user_email, status="FailedInteraction", is_email=True)
+            try:
+                db_adapter = await self._get_db_adapter()
+                await db_adapter.update_user_status(identifier=user_email, status="FailedInteraction", is_email=True)
+            except Exception as db_error:
+                print(f"MessageRouter: Additional error updating user status: {db_error}")
             return {"error": f"An unexpected error occurred: {str(e)}"}
     
     def _extract_response_text(self, response: Dict[str, Any]) -> Optional[str]:

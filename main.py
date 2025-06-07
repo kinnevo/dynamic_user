@@ -24,18 +24,21 @@ if os.path.exists('.env'):
 # message_router = MessageRouter()
 
 @app.on_startup
-def on_startup():
+async def on_startup():
     """Application startup handler"""
     print("Starting up...")
     # Initialize database connection using singleton
-    db_adapter = get_db()
-    db_adapter._init_db()
+    db_adapter = await get_db()
+    print("Database adapter initialized successfully")
 
 
 @app.on_shutdown
-def on_shutdown():
+async def on_shutdown():
     """Application shutdown handler"""
     print("Shutting down...")
+    # Close database connections properly
+    from utils.database_singleton import DatabaseManager
+    await DatabaseManager.reset_instance()
 
 # Redirect root to authentication check
 @ui.page('/')
