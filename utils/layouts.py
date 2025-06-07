@@ -188,7 +188,7 @@ def create_user_selector(container=None, width='w-1/3'):
                 
             return options_dict
         except Exception as e:
-            ui.notify(f'Error loading users: {str(e)}', type='negative')
+            print(f'Error loading users: {str(e)}')  # Use print instead of ui.notify
             return {'error': 'Error loading users'}
     
     # Create user select with multi-selection
@@ -205,9 +205,8 @@ def create_user_selector(container=None, width='w-1/3'):
             new_options_dict = await load_user_options()
             user_select.options = new_options_dict
             user_select.value = []  # Reset selection
-            ui.notify('User list refreshed', type='positive', position='bottom-right', timeout=1500)
         except Exception as e:
-            ui.notify(f'Error refreshing users: {str(e)}', type='negative')
+            print(f'Error refreshing users: {str(e)}')  # Use print instead of ui.notify
     
     def refresh_users_sync():
         """Wrapper to call async refresh_users from sync context"""
