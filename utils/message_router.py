@@ -47,8 +47,13 @@ class MessageRouter:
         try:
             print(f"MessageRouter: Processing message from {user_email} for chat {session_id}: '{message[:50]}...'" ) # Log entry
             
+            # Track total processing time
+            total_start_time = time.time()
+            
             # Get async database adapter
+            db_start = time.time()
             db_adapter = await self._get_db_adapter()
+            db_init_time = int((time.time() - db_start) * 1000)
             
             # Get current user Firebase data
             current_user = FirebaseAuth.get_current_user()
@@ -58,6 +63,7 @@ class MessageRouter:
             print(f"MessageRouter: User Firebase UID: {firebase_uid}, Display Name: {display_name}")
             
             # Save user message to database with Firebase UID and display name
+            db_start = time.time()
             user_message_id = await db_adapter.save_message(
                 user_email=user_email,
                 session_id=session_id,
@@ -66,20 +72,26 @@ class MessageRouter:
                 firebase_uid=firebase_uid,
                 display_name=display_name
             )
+            save_user_msg_time = int((time.time() - db_start) * 1000)
+            
             if not user_message_id:
                 print(f"Error saving user message for {user_email} in chat {session_id}. Aborting.")
                 return {"error": "Failed to save user message."}
             # print(f"MessageRouter: User message saved with ID: {user_message_id}")
             
             # Get conversation history for context, using the session_id
+            db_start = time.time()
             history = await db_adapter.get_conversation_history(session_id)
+            history_time = int((time.time() - db_start) * 1000)
             # print(f"MessageRouter: Fetched history for chat {session_id}. Number of messages: {len(history)}")
             
             # Update user status to Active (identified by email)
+            db_start = time.time()
             await db_adapter.update_user_status(identifier=user_email, status="Active", is_email=True)
+            status_update1_time = int((time.time() - db_start) * 1000)
             
             # Send to FILC Agent API and track processing time
-            start_time = time.time()
+            api_start_time = time.time()
             # print(f"MessageRouter: Calling FilcAgentClient.process_message for chat {session_id}")
             response_from_agent = await self.filc_client.process_message(
                 message=message,
@@ -87,7 +99,7 @@ class MessageRouter:
                 history=history
                 # Potentially pass user_email or a user identifier if filc_client needs it
             )
-            processing_time_ms = int((time.time() - start_time) * 1000)  # Convert to milliseconds
+            api_processing_time_ms = int((time.time() - api_start_time) * 1000)  # Convert to milliseconds
             # print(f"MessageRouter: Received response from agent: {json.dumps(response_from_agent, indent=2)}")
             
             # Extract response text
@@ -95,6 +107,7 @@ class MessageRouter:
             # print(f"MessageRouter: Extracted response text: '{response_text}'")
             
             # Save assistant response to database with Firebase UID and processing time
+            db_start = time.time()
             if response_text:
                 assistant_message_id = await db_adapter.save_message(
                     user_email=user_email,
@@ -104,15 +117,33 @@ class MessageRouter:
                     firebase_uid=firebase_uid,
                     display_name=display_name,
                     model_used="FILC Agent",  # Specify the model used
-                    processing_time=processing_time_ms
+                    processing_time=api_processing_time_ms
                 )
                 # print(f"MessageRouter: Assistant response saved with ID: {assistant_message_id}")
             else:
                 # Handle cases where response_text might be empty or None from _extract_response_text
                 print(f"No valid response text extracted from agent for chat {session_id}. Not saving assistant message.")
+            save_assistant_msg_time = int((time.time() - db_start) * 1000)
             
             # Update user status (e.g., "Completed" could mean completed this interaction cycle)
+            db_start = time.time()
             await db_adapter.update_user_status(identifier=user_email, status="CompletedInteraction", is_email=True)
+            status_update2_time = int((time.time() - db_start) * 1000)
+            
+            # Calculate total times
+            total_processing_time = int((time.time() - total_start_time) * 1000)
+            total_db_time = db_init_time + save_user_msg_time + history_time + status_update1_time + save_assistant_msg_time + status_update2_time
+            
+            # Log performance breakdown
+            print(f"⏱️  Performance breakdown (ms):")
+            print(f"   Total: {total_processing_time}ms")
+            print(f"   API Call: {api_processing_time_ms}ms ({api_processing_time_ms/total_processing_time*100:.1f}%)")
+            print(f"   Database: {total_db_time}ms ({total_db_time/total_processing_time*100:.1f}%)")
+            print(f"   - DB Init: {db_init_time}ms")
+            print(f"   - Save User Msg: {save_user_msg_time}ms")
+            print(f"   - Get History: {history_time}ms")
+            print(f"   - Status Updates: {status_update1_time + status_update2_time}ms")
+            print(f"   - Save Assistant Msg: {save_assistant_msg_time}ms")
             
             result = {
                 "content": response_text if response_text else "No response content from assistant.",
