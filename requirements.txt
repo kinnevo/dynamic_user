@@ -8,7 +8,7 @@ firebase-admin>=6.2.0
 
 # Database - Updated for Cloud SQL support
 psycopg2-binary>=2.9.9
-cloud-sql-python-connector[psycopg2]>=1.15.0
+cloud-sql-python-connector>=1.18.0
 
 # Environment variables
 python-dotenv>=1.0.0

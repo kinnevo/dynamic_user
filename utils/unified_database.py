@@ -16,7 +16,7 @@ def get_sf_time():
     """Get current time in San Francisco timezone"""
     return datetime.now(pytz.utc).astimezone(sf_timezone)
 
-load_dotenv()
+load_dotenv(override=True)
 
 
 class UnifiedDatabaseAdapter(DatabaseInterface):
@@ -36,28 +36,60 @@ class UnifiedDatabaseAdapter(DatabaseInterface):
             use_cloud_sql = os.getenv("USE_CLOUD_SQL", "false").lower() == "true"
             environment = os.getenv("ENVIRONMENT", "development")
             
+            print(f"🔧 Database Configuration:")
+            print(f"   Environment: {environment}")
+            print(f"   Use Cloud SQL: {use_cloud_sql}")
+            
             if use_cloud_sql and environment == "production":
-                # Production: Unix socket connection for Cloud SQL
+                # Production: Use Cloud SQL Python Connector
+                from google.cloud.sql.connector import Connector
+                
                 connection_name = os.getenv("CLOUD_SQL_CONNECTION_NAME")
                 if not connection_name:
                     raise ValueError("CLOUD_SQL_CONNECTION_NAME required for production Cloud SQL")
                 
-                # Unix socket connection
-                host = f"/cloudsql/{connection_name}"
-                dsn = f"host={host} dbname={os.getenv('CLOUD_SQL_DATABASE_NAME')} user={os.getenv('CLOUD_SQL_USERNAME')} password={os.getenv('CLOUD_SQL_PASSWORD')}"
+                print(f"   Connection method: Cloud SQL Connector")
+                print(f"   Connection name: {connection_name}")
+                
+                # Initialize the Cloud SQL Python Connector
+                connector = Connector()
+                
+                def getconn():
+                    """Get a connection using the Cloud SQL Python Connector."""
+                    conn = connector.connect(
+                        connection_name,
+                        "psycopg2",
+                        user=os.getenv('CLOUD_SQL_USERNAME'),
+                        password=os.getenv('CLOUD_SQL_PASSWORD'),
+                        db=os.getenv('CLOUD_SQL_DATABASE_NAME'),
+                    )
+                    return conn
+                
+                # Create connection pool using the connector
+                connection_pool = psycopg2.pool.SimpleConnectionPool(
+                    1, 20,  # min and max connections
+                    connection_factory=getconn
+                )
                 
             elif use_cloud_sql:
                 # Development with Cloud SQL Proxy
+                print(f"   Connection method: Cloud SQL Proxy (127.0.0.1:5432)")
                 dsn = f"host=127.0.0.1 port=5432 dbname={os.getenv('CLOUD_SQL_DATABASE_NAME')} user={os.getenv('CLOUD_SQL_USERNAME')} password={os.getenv('CLOUD_SQL_PASSWORD')}"
+                
+                connection_pool = psycopg2.pool.SimpleConnectionPool(
+                    1, 20,  # min and max connections
+                    dsn
+                )
                 
             else:
                 # Local PostgreSQL
+                print(f"   Connection method: Local PostgreSQL")
                 dsn = f"host={os.getenv('POSTGRES_HOST')} port={os.getenv('POSTGRES_PORT')} dbname={os.getenv('POSTGRES_DB')} user={os.getenv('POSTGRES_USER')} password={os.getenv('POSTGRES_PASSWORD')}"
-            
-            connection_pool = psycopg2.pool.SimpleConnectionPool(
-                1, 20,  # min and max connections
-                dsn
-            )
+                
+                connection_pool = psycopg2.pool.SimpleConnectionPool(
+                    1, 20,  # min and max connections
+                    dsn
+                )
             
             print(f"✅ Unified database connection pool initialized for environment: {environment}")
             return connection_pool
