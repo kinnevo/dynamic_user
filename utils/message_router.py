@@ -1,7 +1,6 @@
 from typing import Dict, Any, List, Optional
 import json
 from utils.filc_agent_client import FilcAgentClient
-from utils.unified_database import UnifiedDatabaseAdapter
 from utils.firebase_auth import FirebaseAuth
 import os
 from datetime import datetime
