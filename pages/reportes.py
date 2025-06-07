@@ -21,7 +21,7 @@ except LookupError:
     nltk.download('stopwords')
 
 @ui.page('/reportes')
-@auth_required
+# @auth_required # TODO: Uncomment this when done debugging
 async def reportes_page():
     # Initialize async database adapter inside function
     db_adapter = await get_db()
@@ -137,7 +137,7 @@ async def reportes_page():
                 async def generate_wordcloud():
                     # Get selected session ID from dropdown (convert label to session_id)
                     if not session_selector.value or session_selector.value not in session_options:
-                        ui.notify('Por favor selecciona una conversación', type='warning')
+                        print('⚠️ Por favor selecciona una conversación')  # Use print instead of ui.notify
                         return
                     
                     selected_session_id = session_options[session_selector.value]
@@ -155,7 +155,7 @@ async def reportes_page():
                                           x=0.5, y=0.5, showarrow=False)
                         fig.update_layout(height=500)
                         wordcloud_plot.update_figure(fig)
-                        ui.notify('No hay mensajes del usuario en esta conversación', type='info')
+                        print('ℹ️ No hay mensajes del usuario en esta conversación')  # Use print instead of ui.notify
                         return
                     
                     # Combine all user message content
@@ -168,7 +168,7 @@ async def reportes_page():
                                           x=0.5, y=0.5, showarrow=False)
                         fig.update_layout(height=500)
                         wordcloud_plot.update_figure(fig)
-                        ui.notify('No hay suficiente texto para generar un wordcloud', type='info')
+                        print('ℹ️ No hay suficiente texto para generar un wordcloud')  # Use print instead of ui.notify
                         return
                     
                     # Get Spanish stopwords from NLTK
@@ -200,7 +200,7 @@ async def reportes_page():
                                               x=0.5, y=0.5, showarrow=False)
                             fig.update_layout(height=500)
                             wordcloud_plot.update_figure(fig)
-                            ui.notify('No se pudieron extraer palabras significativas', type='info')
+                            print('ℹ️ No se pudieron extraer palabras significativas')  # Use print instead of ui.notify
                             return
                         
                         # Get the image array
@@ -220,9 +220,9 @@ async def reportes_page():
                         
                         # Update the plot
                         wordcloud_plot.update_figure(fig)
-                        ui.notify(f'Wordcloud generado con éxito para la conversación seleccionada ({len(user_messages)} mensajes)', type='positive')
+                        print(f'✅ Wordcloud generado con éxito para la conversación seleccionada ({len(user_messages)} mensajes)')  # Use print instead of ui.notify
                     except Exception as e:
-                        ui.notify(f'Error al generar wordcloud: {str(e)}', type='negative')
+                        print(f'❌ Error al generar wordcloud: {str(e)}')  # Use print instead of ui.notify
                         print(f"Error: {str(e)}")
                 
                 # Button to generate the wordcloud - wrap async function for ui callback
