@@ -15,12 +15,32 @@ from utils.auth_middleware import auth_required
 from utils.layouts import create_navigation_menu_2, create_date_range_selector, create_user_selector # Re-added imports
 
 # Load environment variables
-load_dotenv()
+load_dotenv(override=True)
 
-# # API Configuration
-# API_BASE_URL = "https://fireportes-production.up.railway.app/api/v1"
-API_BASE_URL = "http://localhost:8000/api/v1/"  # for local development
+# API Configuration - Use environment variables to determine API URL
+def get_api_base_url():
+    """Get the API base URL based on environment configuration."""
+    environment = os.getenv("ENVIRONMENT", "development")
+    
+    # Strip comments and whitespace from environment variable
+    if environment:
+        environment = environment.split('#')[0].strip().lower()
+    else:
+        environment = "development"
+    
+    if environment == "production":
+        return os.getenv("ADMIN_API_URL_PRODUCTION", "https://fireportes-production.up.railway.app/api/v1")
+    else:
+        return os.getenv("ADMIN_API_URL_LOCAL", "http://localhost:8000/api/v1")
+
+API_BASE_URL = get_api_base_url()
 API_KEY = os.getenv("FI_ANALYTICS_API_KEY")
+
+print(f"Admin API Configuration:")
+print(f"  Environment: {os.getenv('ENVIRONMENT', 'development')}")
+print(f"  Parsed Environment: {os.getenv('ENVIRONMENT', 'development').split('#')[0].strip().lower() if os.getenv('ENVIRONMENT') else 'development'}")
+print(f"  API Base URL: {API_BASE_URL}")
+print(f"  API Key configured: {'Yes' if API_KEY else 'No'}")
 
 if not API_KEY:
     print("ERROR: FI_ANALYTICS_API_KEY not found in environment variables.")
@@ -95,9 +115,9 @@ async def show_user_details(user_data, client=None):
     if not isinstance(user_data, dict) or not client or not client.has_socket_connection:
         return
     
-    session_id = user_data.get('session_id', 'N/A')
-    user_id = user_data.get('user_id', 'N/A')
-    logged = user_data.get('logged', 'N/A')
+    name = user_data.get('display_name', 'N/A')
+    user_id = user_data.get('id', 'N/A')
+    logged = user_data.get('is_active', 'N/A')
     
     # Create a placeholder element to avoid the UI context issue
     placeholder_id = f"user_modal_{user_id}"
@@ -138,8 +158,8 @@ async def show_user_details(user_data, client=None):
         details.classList.add('p-4', 'w-full');
         details.innerHTML = `
             <p class="mb-2"><strong>User ID:</strong> {user_id}</p>
-            <p class="mb-2"><strong>Session ID:</strong> {session_id}</p>
-            <p class="mb-2"><strong>Logged Status:</strong> {logged}</p>
+            <p class="mb-2"><strong>Name:</strong> {name}</p>
+            <p class="mb-2"><strong>Active Status:</strong> {logged}</p>
         `;
         
         // Messages section
@@ -203,7 +223,7 @@ async def show_user_details(user_data, client=None):
     await client.run_javascript(update_js)
     
     # Fetch messages asynchronously
-    messages_data = await api_request('GET', f'/sessions/{session_id}/recent-messages', client=client, params={'limit': 20})
+    messages_data = await api_request('GET', f'/sessions/{user_id}/recent-messages', client=client, params={'limit': 20})
     
     # Format and display messages
     messages_html = ""
@@ -267,14 +287,18 @@ async def show_summary_details(summary_data, client=None):
     # Check if we need to fetch the full summary - if the summary key contains "..." it's likely truncated
     if '...' in summary_data.get('summary', '') and summary_id:
         # Fetch the complete summary data from the API
+        print(f"DEBUG: Fetching full summary data for ID: {summary_id}")
         full_summary_data = await api_request('GET', f'/summaries/{summary_id}', client=client)
         if full_summary_data and isinstance(full_summary_data, dict):
             # Replace our data with the complete version
             summary_data = full_summary_data
+            print(f"DEBUG: Successfully fetched full summary data")
+        else:
+            print(f"DEBUG: Failed to fetch full summary data or invalid response")
     
     # Now extract all needed fields
     user_id = summary_data.get('user_id', 'N/A')
-    session_id = summary_data.get('session_id', 'N/A')
+    conversation_id = summary_data.get('conversation_id', 'N/A')
     created_at = summary_data.get('created_at', 'N/A')
     logged = 'Yes' if summary_data.get('logged') else 'No'
     
@@ -320,7 +344,7 @@ async def show_summary_details(summary_data, client=None):
         details.innerHTML = `
             <p class="mb-2"><strong>Summary ID:</strong> {summary_id}</p>
             <p class="mb-2"><strong>User ID:</strong> {user_id}</p>
-            <p class="mb-2"><strong>Session ID:</strong> {session_id}</p>
+            <p class="mb-2"><strong>Conversation ID:</strong> {conversation_id}</p>
             <p class="mb-2"><strong>Created At:</strong> {created_at}</p>
             <p class="mb-2"><strong>Logged:</strong> {logged}</p>
             <h4 class="font-bold mt-6 mb-3 text-lg">Summary:</h4>
@@ -392,13 +416,24 @@ class AdminPageManager:
         sort_by = pagination_in.get('sortBy', 'user_id')
         descending = pagination_in.get('descending', False)
 
-        # print(f"--> Requesting paginated users: page={page}, limit={rows_per_page}, sort_by={sort_by}, descending={descending}")
+        # Map frontend column names to API sort field names
+        sort_field_mapping = {
+            'user_id': 'user_id',
+            'logged': 'is_active',
+            'message_count': 'message_count',
+            'last_activity': 'last_activity'
+        }
+        
+        # Use the mapped field name for API call
+        api_sort_by = sort_field_mapping.get(sort_by, 'user_id')
+
+        print(f"--> Requesting paginated users: page={page}, limit={rows_per_page}, sort_by={sort_by} -> {api_sort_by}, descending={descending}")
         skip = (page - 1) * rows_per_page
 
         api_params = {
             'skip': skip,
             'limit': rows_per_page,
-            'sort_by': sort_by,
+            'sort_by': api_sort_by,
             'descending': descending
         }
 
@@ -412,12 +447,28 @@ class AdminPageManager:
         table_rows = []
         total_users = 0
 
+        # Debug: Log the full response structure
+        # print(f"DEBUG: Full response_data = {response_data}")
+
         if response_data and isinstance(response_data, dict) and 'users' in response_data and 'total_users' in response_data:
             users_page_data = response_data['users']
             total_users = response_data['total_users']
             print(f"<-- Received {len(users_page_data)} users (total: {total_users})")
+        elif response_data and isinstance(response_data, list):
+            # Fallback: Maybe the API returns a direct array instead of wrapped structure
+            users_page_data = response_data
+            total_users = len(response_data)
+            print(f"<-- Received direct array: {len(users_page_data)} users")
+        else:
+            print("ERROR: Invalid response format from paginated users endpoint or API error.")
+            users_page_data = []
+            total_users = 0
 
+        if users_page_data:
             for user in users_page_data:
+                # Debug logging to see actual API response values
+                # print(f"DEBUG: User data - id: {user.get('id')}, message_count: {user.get('message_count')}, created_at: {user.get('created_at')}")
+                
                 last_active_str = 'Never'
                 raw_last_active = user.get('last_active')
                 if raw_last_active:
@@ -426,32 +477,35 @@ class AdminPageManager:
                     except (ValueError, TypeError):
                         last_active_str = raw_last_active
 
+                # Format created_at for start_time - handle missing created_at from paginated endpoint
+                start_time_str = 'Not Available'  # Since paginated endpoint doesn't include created_at
+                raw_created_at = user.get('created_at')
+                if raw_created_at:
+                    try:
+                        start_time_str = datetime.fromisoformat(raw_created_at).strftime("%Y-%m-%d %H:%M:%S")
+                    except (ValueError, TypeError):
+                        start_time_str = raw_created_at
+
                 table_rows.append({
-                    'user_id': user.get('user_id'),
-                    'session_id': user.get('session_id'),
-                    'logged': 'Yes' if user.get('logged', False) else 'No',
-                    'message_count': user.get('message_count', 0),
-                    'start_time': 'Never',
+                    'user_id': user.get('id'),
+                    'name': user.get('display_name', 'N/A'),
+                    'logged': 'Yes' if user.get('is_active', False) else 'No',
+                    'message_count': user.get('message_count', 0),  # Use message_count instead of total_messages
+                    'start_time': start_time_str,
                     'last_activity': last_active_str
                 })
 
-            self.users_table.rows = table_rows
+        # Update table regardless of whether we have data or not
+        self.users_table.rows = table_rows
 
-            new_pagination = dict(pagination_in)
-            new_pagination['rowsNumber'] = total_users
-            self.users_table.pagination = new_pagination
-            self.pagination_state.update(new_pagination)
+        new_pagination = dict(pagination_in)
+        new_pagination['rowsNumber'] = total_users
+        self.users_table.pagination = new_pagination
+        self.pagination_state.update(new_pagination)
 
-            if self.client and self.client.has_socket_connection:
-                js_command = f"Quasar.plugins.Notify.create({{ message: 'Loaded page {page} ({len(table_rows)} of {total_users} users)', type: 'positive', position: 'bottom-right', timeout: 1500 }})"
-                self.client.run_javascript(js_command)
-        else:
-            print("ERROR: Invalid response format from paginated users endpoint or API error.")
-            self.users_table.rows = []
-            new_pagination = dict(pagination_in)
-            new_pagination['rowsNumber'] = total_users # Use 0 if fetch failed
-            self.users_table.pagination = new_pagination
-            self.pagination_state.update(new_pagination)
+        if self.client and self.client.has_socket_connection:
+            js_command = f"Quasar.plugins.Notify.create({{ message: 'Loaded page {page} ({len(table_rows)} of {total_users} users)', type: 'positive', position: 'bottom-right', timeout: 1500 }})"
+            self.client.run_javascript(js_command)
 
         # --- Set loading to false after request (success or failure) ---
         self.is_loading = False # Set manual loading state
@@ -497,7 +551,9 @@ class AdminPageManager:
             print("No summaries data provided or data is empty, skipping batch analysis trigger.")
             return
 
-        summary_ids = [s.get('summary_id') for s in summaries_data_list if isinstance(s, dict) and s.get('summary_id')]
+        summary_ids = [s.get('id') for s in summaries_data_list if isinstance(s, dict) and s.get('id')]
+
+        print(f"DEBUG: Extracted summary IDs: {summary_ids}")
 
         if not summary_ids:
             print("No valid summary IDs found in the provided data to trigger batch analysis.")
@@ -813,7 +869,7 @@ class AdminPageManager:
                 columns = [
                     {'name': 'summary_id', 'field': 'summary_id', 'label': 'ID', 'align': 'left'},
                     {'name': 'user_id', 'field': 'user_id', 'label': 'User ID', 'align': 'left'},
-                    {'name': 'session_id', 'field': 'session_id', 'label': 'Session ID', 'align': 'left'},
+                    {'name': 'conversation_id', 'field': 'conversation_id', 'label': 'Conversation ID', 'align': 'left'},
                     {'name': 'created_at', 'field': 'created_at', 'label': 'Created At', 'align': 'left'},
                     {'name': 'logged', 'field': 'logged', 'label': 'Logged User', 'align': 'center'},
                     {'name': 'summary', 'field': 'summary', 'label': 'Summary (Preview)', 'align': 'left'},
@@ -833,9 +889,9 @@ class AdminPageManager:
                     full_summary_text = summary_item.get('summary', '')
                     
                     rows.append({
-                        'summary_id': summary_item.get('summary_id', 'N/A'),
+                        'summary_id': summary_item.get('id', 'N/A'),
                         'user_id': summary_item.get('user_id', 'N/A'),
-                        'session_id': summary_item.get('session_id', 'N/A'),
+                        'conversation_id': summary_item.get('conversation_id', 'N/A'),
                         'created_at': formatted_time,
                         'logged': logged,
                         'summary': full_summary_text[:100] + '...' if len(full_summary_text) > 100 else full_summary_text,
@@ -910,7 +966,7 @@ class AdminPageManager:
                 columns = [
                     {'name': 'summary_id', 'field': 'summary_id', 'label': 'ID', 'align': 'left'},
                     {'name': 'user_id', 'field': 'user_id', 'label': 'User ID', 'align': 'left'},
-                    {'name': 'session_id', 'field': 'session_id', 'label': 'Session ID', 'align': 'left'},
+                    {'name': 'conversation_id', 'field': 'conversation_id', 'label': 'Conversation ID', 'align': 'left'},
                     {'name': 'created_at', 'field': 'created_at', 'label': 'Created At', 'align': 'left'},
                     {'name': 'logged', 'field': 'logged', 'label': 'Logged User', 'align': 'center'},
                     {'name': 'summary', 'field': 'summary', 'label': 'Summary (Preview)', 'align': 'left'},
@@ -931,13 +987,13 @@ class AdminPageManager:
                     full_summary_text = summary_item.get('summary', '')
                     
                     rows.append({
-                        'summary_id': summary_item.get('summary_id', 'N/A'),
+                        'summary_id': summary_item.get('id', 'N/A'),
                         'user_id': summary_item.get('user_id', 'N/A'),
-                        'session_id': summary_item.get('session_id', 'N/A'),
+                        'conversation_id': summary_item.get('conversation_id', 'N/A'),
                         'created_at': formatted_time,
                         'logged': logged,
                         'summary': full_summary_text[:100] + '...' if len(full_summary_text) > 100 else full_summary_text,
-                        'original_summary': full_summary_text 
+                        'original_summary': full_summary_text
                     })
                 
                 ui.label(f'Displaying {len(rows)} existing summaries.').classes('text-h6 mt-4 mb-2')
@@ -1009,11 +1065,11 @@ class AdminPageManager:
 
                     users_columns = [
                          {'name': 'user_id', 'field': 'user_id', 'label': 'User ID', 'align': 'left', 'sortable': True}, # Enable sorting if API supports it
-                         {'name': 'session_id', 'field': 'session_id', 'label': 'Session ID', 'align': 'left', 'sortable': False},
-                         {'name': 'logged', 'field': 'logged', 'label': 'Logged', 'align': 'center', 'sortable': False},
+                         {'name': 'name', 'field': 'name', 'label': 'Name', 'align': 'left', 'sortable': False},
+                         {'name': 'logged', 'field': 'logged', 'label': 'Logged', 'align': 'center', 'sortable': True}, # Use is_active for sorting
                          {'name': 'message_count', 'field': 'message_count', 'label': 'Messages', 'align': 'center', 'sortable': True}, # Enable sorting
                          {'name': 'start_time', 'field': 'start_time', 'label': 'Started', 'align': 'center', 'sortable': False}, # Or True if API supports
-                         {'name': 'last_activity', 'field': 'last_activity', 'label': 'Last Activity', 'align': 'center', 'sortable': True} # Enable sorting
+                         {'name': 'last_activity', 'field': 'last_activity', 'label': 'Last Activity', 'align': 'center', 'sortable': True} # Use last_activity for sorting
                     ]
 
                     # Create the table, binding pagination to the class state
@@ -1117,8 +1173,8 @@ class AdminPageManager:
         ''') # Keep existing styles/scripts
 
 @ui.page('/admin')
-@auth_required
-async def page_admin():
+# @auth_required # TODO: Uncomment this when done debugging
+def page_admin():
     """Admin page handler - creates a new manager instance for each session."""
     # Create a new manager instance for this session
     admin_manager = AdminPageManager()

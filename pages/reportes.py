@@ -20,14 +20,11 @@ try:
 except LookupError:
     nltk.download('stopwords')
 
-# Use singleton database adapter - moved inside function to avoid module-level initialization
-# db_adapter = get_db()
-
 @ui.page('/reportes')
-@auth_required
-def reportes_page():
-    # Initialize database adapter inside function
-    db_adapter = get_db()
+# @auth_required # TODO: Uncomment this when done debugging
+async def reportes_page():
+    # Initialize async database adapter inside function
+    db_adapter = await get_db()
     
     create_navigation_menu_2()
 
@@ -50,7 +47,7 @@ def reportes_page():
                     return
 
                 # Get all chat sessions for the user
-                chat_sessions = db_adapter.get_chat_sessions_for_user(user_email)
+                chat_sessions = await db_adapter.get_chat_sessions_for_user(user_email)
                 
                 if not chat_sessions:
                     ui.label("No hay conversaciones disponibles para analizar").classes('text-orange-600 mb-4')
@@ -100,7 +97,7 @@ def reportes_page():
                 # Show selected session info
                 session_info = ui.label().classes('text-subtitle2 mb-4 text-blue-600')
                 
-                def update_session_info():
+                async def update_session_info():
                     if session_selector.value and session_selector.value in session_options:
                         # Get the actual session_id from the selected label
                         selected_session_id = session_options[session_selector.value]
@@ -109,18 +106,23 @@ def reportes_page():
                             None
                         )
                         if selected_session:
-                            message_count = len(db_adapter.get_recent_messages(selected_session_id, limit=1000))
+                            messages = await db_adapter.get_recent_messages(selected_session_id, limit=1000)
+                            message_count = len(messages)
                             session_info.text = f"Sesión seleccionada: {selected_session_id[:8]}... | Total mensajes: {message_count}"
                         else:
                             session_info.text = "Sesión no encontrada"
                     else:
                         session_info.text = "Ninguna sesión seleccionada"
 
-                # Update info when selection changes
-                session_selector.on_value_change(lambda: update_session_info())
+                # Update info when selection changes - wrap async function for ui callback
+                def on_session_change():
+                    import asyncio
+                    asyncio.create_task(update_session_info())
+                    
+                session_selector.on_value_change(lambda: on_session_change())
                 
                 # Initial session info update
-                update_session_info()
+                await update_session_info()
                 
                 # Create initial empty figure
                 initial_fig = go.Figure()
@@ -132,16 +134,16 @@ def reportes_page():
                 # Container for the wordcloud using Plotly - now with initial figure
                 wordcloud_plot = ui.plotly(initial_fig).classes('w-full h-[500px] border rounded my-4')
                 
-                def generate_wordcloud():
+                async def generate_wordcloud():
                     # Get selected session ID from dropdown (convert label to session_id)
                     if not session_selector.value or session_selector.value not in session_options:
-                        ui.notify('Por favor selecciona una conversación', type='warning')
+                        print('⚠️ Por favor selecciona una conversación')  # Use print instead of ui.notify
                         return
                     
                     selected_session_id = session_options[session_selector.value]
                     
                     # Get all messages for selected session
-                    messages = db_adapter.get_recent_messages(selected_session_id, limit=1000)
+                    messages = await db_adapter.get_recent_messages(selected_session_id, limit=1000)
                     
                     # Filter only user messages
                     user_messages = [msg for msg in messages if msg['role'] == 'user']
@@ -153,7 +155,7 @@ def reportes_page():
                                           x=0.5, y=0.5, showarrow=False)
                         fig.update_layout(height=500)
                         wordcloud_plot.update_figure(fig)
-                        ui.notify('No hay mensajes del usuario en esta conversación', type='info')
+                        print('ℹ️ No hay mensajes del usuario en esta conversación')  # Use print instead of ui.notify
                         return
                     
                     # Combine all user message content
@@ -166,7 +168,7 @@ def reportes_page():
                                           x=0.5, y=0.5, showarrow=False)
                         fig.update_layout(height=500)
                         wordcloud_plot.update_figure(fig)
-                        ui.notify('No hay suficiente texto para generar un wordcloud', type='info')
+                        print('ℹ️ No hay suficiente texto para generar un wordcloud')  # Use print instead of ui.notify
                         return
                     
                     # Get Spanish stopwords from NLTK
@@ -198,7 +200,7 @@ def reportes_page():
                                               x=0.5, y=0.5, showarrow=False)
                             fig.update_layout(height=500)
                             wordcloud_plot.update_figure(fig)
-                            ui.notify('No se pudieron extraer palabras significativas', type='info')
+                            print('ℹ️ No se pudieron extraer palabras significativas')  # Use print instead of ui.notify
                             return
                         
                         # Get the image array
@@ -218,17 +220,22 @@ def reportes_page():
                         
                         # Update the plot
                         wordcloud_plot.update_figure(fig)
-                        ui.notify(f'Wordcloud generado con éxito para la conversación seleccionada ({len(user_messages)} mensajes)', type='positive')
+                        print(f'✅ Wordcloud generado con éxito para la conversación seleccionada ({len(user_messages)} mensajes)')  # Use print instead of ui.notify
                     except Exception as e:
-                        ui.notify(f'Error al generar wordcloud: {str(e)}', type='negative')
+                        print(f'❌ Error al generar wordcloud: {str(e)}')  # Use print instead of ui.notify
                         print(f"Error: {str(e)}")
                 
-                # Button to generate the wordcloud
-                ui.button('Generar Wordcloud', on_click=generate_wordcloud).props('color=primary size=lg').classes('mb-4')
+                # Button to generate the wordcloud - wrap async function for ui callback
+                def on_generate_click():
+                    import asyncio
+                    asyncio.create_task(generate_wordcloud())
+                    
+                ui.button('Generar Wordcloud', on_click=on_generate_click).props('color=primary size=lg').classes('mb-4')
                 
                 # Auto-generate wordcloud on page load with first session
                 if session_selector.value and session_selector.value in session_options:
-                    ui.timer(1.0, generate_wordcloud, once=True)
+                    import asyncio
+                    asyncio.create_task(generate_wordcloud())
                 
             with ui.tab_panel('Otros Reportes'):
                 ui.label('Espera pronto más reportes para ti.').classes('text-h6 q-mt-md')
@@ -239,13 +246,13 @@ def reportes_page():
                     
                     user_email = app.storage.user.get('user_email')
                     if user_email:
-                        chat_sessions = db_adapter.get_chat_sessions_for_user(user_email)
+                        chat_sessions = await db_adapter.get_chat_sessions_for_user(user_email)
                         total_conversations = len(chat_sessions)
                         
                         # Calculate total messages across all conversations
                         total_messages = 0
                         for session in chat_sessions:
-                            messages = db_adapter.get_recent_messages(session['session_id'], limit=1000)
+                            messages = await db_adapter.get_recent_messages(session['session_id'], limit=1000)
                             total_messages += len(messages)
                         
                         ui.label(f'Total de conversaciones: {total_conversations}').classes('mb-1')

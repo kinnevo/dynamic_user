@@ -1,19 +1,59 @@
 import aiohttp
 import asyncio
 import json
+import os
+from dotenv import load_dotenv
 from typing import Dict, List, Any, Optional, Tuple
+
+# Load environment variables
+load_dotenv(override=True)
+
+def get_filc_api_url():
+    """Get the FILC API URL based on environment configuration."""
+    environment = os.getenv("ENVIRONMENT", "development")
+    
+    # Strip comments and whitespace from environment variable
+    if environment:
+        environment = environment.split('#')[0].strip().lower()
+    else:
+        environment = "development"
+    
+    if environment == "production":
+        return os.getenv("FILC_API_URL_PRODUCTION", "https://filc-production.up.railway.app")
+    else:
+        return os.getenv("FILC_API_URL_LOCAL", "http://localhost:3000")
 
 class FilcAgentClient:
     """Client for interacting with the FILC Agent API"""
     
-    def __init__(self, base_url: str = "https://filc-production.up.railway.app"):
-        self.base_url = base_url
+    def __init__(self, base_url: str = None, api_key: str = None):
+        # Use environment variable if no base_url is provided
+        self.base_url = base_url or get_filc_api_url()
+        
+        # Use environment variable if no api_key is provided
+        self.api_key = api_key or os.getenv("FILC_API_KEY")
+        
         self.chat_endpoint = "/api/v1/agent/chat"
         self.headers = {
             'accept': 'application/json',
             'Content-Type': 'application/json'
         }
+        
+        # Add API key to headers if available
+        if self.api_key:
+            self.headers['X-API-Key'] = self.api_key
+        
         self.connection_status = "unknown"  # Added for UI compatibility
+        
+        print(f"FILC Agent Configuration:")
+        print(f"  Environment: {os.getenv('ENVIRONMENT', 'development')}")
+        parsed_env = os.getenv("ENVIRONMENT", "development").split('#')[0].strip().lower() if os.getenv("ENVIRONMENT") else "development"
+        print(f"  Parsed Environment: {parsed_env}")
+        print(f"  API Base URL: {self.base_url}")
+        print(f"  API Key configured: {'Yes' if self.api_key else 'No'}")
+        
+        if not self.api_key:
+            print("WARNING: FILC_API_KEY not found in environment variables. API calls may fail if the service requires authentication.")
         
     async def check_connection(self) -> Tuple[bool, str]:
         """Check if the API is reachable"""

@@ -168,51 +168,53 @@ def create_user_selector(container=None, width='w-1/3'):
     Returns:
         Tuple of (user_select, refresh_function)
     """
-    user_db = get_db()
     
     if container is None:
         container = ui
     
-    def load_user_options():
-        conn = None
+    async def load_user_options():
         # Use a dictionary for options (key: value pairs)
         options_dict = {'all': 'All Users'}
         
         try:
-            conn = user_db.connection_pool.getconn()
-            with conn.cursor() as cursor:
-                cursor.execute("SELECT id FROM users ORDER BY id")
-                rows = cursor.fetchall()
+            user_db = await get_db()
+            async with user_db.pool.acquire() as conn:
+                rows = await conn.fetch("SELECT id FROM users ORDER BY id")
                 
                 # Add individual users to dictionary
                 for row in rows:
-                    user_id = row[0]  # Get the first element of the tuple
+                    user_id = row['id']
                     options_dict[str(user_id)] = f'User {user_id}'
                 
             return options_dict
         except Exception as e:
-            ui.notify(f'Error loading users: {str(e)}', type='negative')
+            print(f'Error loading users: {str(e)}')  # Use print instead of ui.notify
             return {'error': 'Error loading users'}
-        finally:
-            if conn:
-                try:
-                    user_db.connection_pool.putconn(conn)
-                except Exception as pool_e:
-                    print(f"ERROR putting connection back to pool: {pool_e}")
     
     # Create user select with multi-selection
-    user_options_dict = load_user_options()
+    # Start with basic options, will be populated by refresh
     user_select = container.select(
-        options=user_options_dict, 
+        options={'all': 'All Users'}, 
         multiple=True,
         value=[]
     ).classes(width)
     user_select.props('dense outlined label="Select Users" clearable use-chips')
     
-    def refresh_users():
-        new_options_dict = load_user_options()
-        user_select.options = new_options_dict
-        user_select.value = []  # Reset selection
-        ui.notify('User list refreshed', type='positive', position='bottom-right', timeout=1500)
+    async def refresh_users():
+        try:
+            new_options_dict = await load_user_options()
+            user_select.options = new_options_dict
+            user_select.value = []  # Reset selection
+        except Exception as e:
+            print(f'Error refreshing users: {str(e)}')  # Use print instead of ui.notify
     
-    return user_select, refresh_users
+    def refresh_users_sync():
+        """Wrapper to call async refresh_users from sync context"""
+        import asyncio
+        asyncio.create_task(refresh_users())
+    
+    # Load initial options asynchronously
+    import asyncio
+    asyncio.create_task(refresh_users())
+    
+    return user_select, refresh_users_sync
