@@ -6,9 +6,9 @@ passlib[bcrypt]
 pyrebase4>=4.7.1
 firebase-admin>=6.2.0
 
-# Database - Updated for Cloud SQL support
-psycopg2-binary>=2.9.9
-cloud-sql-python-connector>=1.18.0
+# Database - Cloud SQL support
+asyncpg>=0.30.0
+cloud-sql-python-connector[asyncpg]>=1.18.0
 
 # Environment variables
 python-dotenv>=1.0.0
@@ -37,9 +37,6 @@ plotly>=6.0.1
 # langchain-core>=0.3.33
 # pydantic>=2.0.0
 # markdown>=3.4.1
-
-# Google Cloud SQL support
-cloud-sql-python-connector>=1.11.0
 
 # General tools 
 setuptools>=80.3.1

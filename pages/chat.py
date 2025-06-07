@@ -20,7 +20,7 @@ async def chat_page():
     
     # Initialize components inside function to avoid module-level database calls
     message_router = MessageRouter()
-    db_adapter = get_db()  # Use singleton instance
+    db_adapter = await get_db()  # Use singleton instance with await
     
     # --- UI Element Variables (defined early for access in helpers) ---
     messages_container: Optional[ui.column] = None
@@ -57,8 +57,8 @@ async def chat_page():
         
         if spinner: spinner.visible = True
         try:
-            history = await asyncio.to_thread(db_adapter.get_recent_messages, session_id=chat_id, limit=100)
-            if not messages_container: return 
+            history = await db_adapter.get_conversation_history(session_id=chat_id)
+            if not messages_container: return
             
             if not history:
                 with messages_container:
@@ -82,7 +82,7 @@ async def chat_page():
                     ui.label(f"Error al cargar el chat {chat_id}.").classes('text-negative')
         finally:
             if spinner: spinner.visible = False
-        update_chat_list.refresh() # update_chat_list is a refreshable function in scope
+        update_chat_list.refresh() # Remove await - refresh() is not async
 
     async def scroll_to_bottom():
         """Simple scroll function using element ID and fallback methods."""
@@ -154,7 +154,7 @@ async def chat_page():
             
     # --- Chat Logic & Refreshable Components ---
     @ui.refreshable
-    def update_chat_list():
+    async def update_chat_list():
         nonlocal chat_list_ui # chat_list_ui is modified here
         if not chat_list_ui: return
 
@@ -165,7 +165,7 @@ async def chat_page():
                 ui.label("Error: Usuario no identificado.")
             return
 
-        chat_sessions = db_adapter.get_chat_sessions_for_user(user_email)
+        chat_sessions = await db_adapter.get_chat_sessions_for_user(user_email)
         if not chat_sessions:
             with chat_list_ui:
                 ui.label("No hay chats aún.").classes('text-gray-500 p-2')
@@ -208,7 +208,7 @@ async def chat_page():
         if message_input:
             message_input.enable()
             message_input.value = ''
-        update_chat_list.refresh() 
+        update_chat_list.refresh() # Remove await - refresh() is not async
         await scroll_to_bottom()
 
     async def send_current_message():
@@ -273,8 +273,7 @@ async def chat_page():
             await scroll_to_bottom()
         finally:
             if spinner: spinner.visible = False
-
-        update_chat_list.refresh() # Refresh sidebar, timestamps might have updated
+        update_chat_list.refresh() # Remove await - refresh() is not async
 
     # --- Initial Page Load Logic ---
     user_email = app.storage.user.get('user_email')
@@ -282,19 +281,19 @@ async def chat_page():
         ui.label("Error: Usuario no autenticado.").classes('text-center m-auto text-negative')
         return
 
-    update_chat_list() 
+    await update_chat_list() 
 
     active_chat_id_on_load = app.storage.user.get('active_chat_id')
     if active_chat_id_on_load:
         # Must await async functions called directly
         await load_and_display_chat_history(active_chat_id_on_load)
     else:
-        chat_sessions = db_adapter.get_chat_sessions_for_user(user_email)
+        chat_sessions = await db_adapter.get_chat_sessions_for_user(user_email)
         if chat_sessions:
             most_recent_chat_id = chat_sessions[0]['session_id']
             app.storage.user['active_chat_id'] = most_recent_chat_id
             await load_and_display_chat_history(most_recent_chat_id)
-            # update_chat_list.refresh() # load_and_display_chat_history already calls this
+            # load_and_display_chat_history already calls update_chat_list.refresh()
         else:
             if messages_container: messages_container.clear()
             if messages_container:

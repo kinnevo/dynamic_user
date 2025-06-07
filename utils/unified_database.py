@@ -19,6 +19,132 @@ def get_sf_time():
 load_dotenv(override=True)
 
 
+class PG8000DictCursor:
+    """Wrapper to make pg8000 cursor behave like psycopg2 DictCursor."""
+    
+    def __init__(self, cursor):
+        self.cursor = cursor
+        self.description = None
+        self.rowcount = 0
+    
+    def execute(self, query, params=None):
+        if params:
+            # Convert psycopg2-style %s placeholders to pg8000-style named parameters
+            # For simplicity, we'll use positional parameters
+            if isinstance(params, (list, tuple)):
+                # Convert %s to numbered placeholders for pg8000
+                converted_query = query
+                param_count = 0
+                while '%s' in converted_query:
+                    converted_query = converted_query.replace('%s', f'%({param_count})s', 1)
+                    param_count += 1
+                
+                # Create named parameter dict
+                param_dict = {str(i): params[i] for i in range(len(params))}
+                result = self.cursor.execute(converted_query, param_dict)
+            else:
+                result = self.cursor.execute(query, params)
+        else:
+            result = self.cursor.execute(query)
+        
+        self.description = self.cursor.description
+        self.rowcount = self.cursor.rowcount if hasattr(self.cursor, 'rowcount') else 0
+        return result
+    
+    def fetchone(self):
+        row = self.cursor.fetchone()
+        if row and self.description:
+            # Convert to dict-like object
+            return dict(zip([desc[0] for desc in self.description], row))
+        return row
+    
+    def fetchall(self):
+        rows = self.cursor.fetchall()
+        if rows and self.description:
+            # Convert to list of dict-like objects
+            column_names = [desc[0] for desc in self.description]
+            return [dict(zip(column_names, row)) for row in rows]
+        return rows
+    
+    def fetchmany(self, size=None):
+        rows = self.cursor.fetchmany(size) if size else self.cursor.fetchmany()
+        if rows and self.description:
+            column_names = [desc[0] for desc in self.description]
+            return [dict(zip(column_names, row)) for row in rows]
+        return rows
+    
+    def __enter__(self):
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass  # pg8000 cursors don't need explicit closing
+
+
+class PG8000ConnectionWrapper:
+    """Wrapper to make pg8000 connection behave like psycopg2 connection."""
+    
+    def __init__(self, pg8000_conn):
+        self.pg8000_conn = pg8000_conn
+    
+    def cursor(self, cursor_factory=None):
+        cursor = self.pg8000_conn.cursor()
+        if cursor_factory == DictCursor:
+            return PG8000DictCursor(cursor)
+        else:
+            # For regular cursors, we still need some compatibility
+            class RegularCursorWrapper:
+                def __init__(self, cursor):
+                    self.cursor = cursor
+                    self.rowcount = 0
+                
+                def execute(self, query, params=None):
+                    if params:
+                        if isinstance(params, (list, tuple)):
+                            # Convert %s to numbered placeholders for pg8000
+                            converted_query = query
+                            param_count = 0
+                            while '%s' in converted_query:
+                                converted_query = converted_query.replace('%s', f'%({param_count})s', 1)
+                                param_count += 1
+                            
+                            # Create named parameter dict
+                            param_dict = {str(i): params[i] for i in range(len(params))}
+                            result = self.cursor.execute(converted_query, param_dict)
+                        else:
+                            result = self.cursor.execute(query, params)
+                    else:
+                        result = self.cursor.execute(query)
+                    
+                    self.rowcount = self.cursor.rowcount if hasattr(self.cursor, 'rowcount') else 0
+                    return result
+                
+                def fetchone(self):
+                    return self.cursor.fetchone()
+                
+                def fetchall(self):
+                    return self.cursor.fetchall()
+                
+                def fetchmany(self, size=None):
+                    return self.cursor.fetchmany(size) if size else self.cursor.fetchmany()
+                
+                def __enter__(self):
+                    return self
+                
+                def __exit__(self, exc_type, exc_val, exc_tb):
+                    pass
+            
+            return RegularCursorWrapper(cursor)
+    
+    def commit(self):
+        return self.pg8000_conn.commit()
+    
+    def rollback(self):
+        return self.pg8000_conn.rollback()
+    
+    def close(self):
+        return self.pg8000_conn.close()
+
+
 class UnifiedDatabaseAdapter(DatabaseInterface):
     """
     Unified database adapter using the new schema for both local and cloud environments.
@@ -41,14 +167,15 @@ class UnifiedDatabaseAdapter(DatabaseInterface):
             print(f"   Use Cloud SQL: {use_cloud_sql}")
             
             if use_cloud_sql and environment == "production":
-                # Production: Use Cloud SQL Python Connector
+                # Production: Use Cloud SQL Python Connector with pg8000
                 from google.cloud.sql.connector import Connector
+                import pg8000
                 
                 connection_name = os.getenv("CLOUD_SQL_CONNECTION_NAME")
                 if not connection_name:
                     raise ValueError("CLOUD_SQL_CONNECTION_NAME required for production Cloud SQL")
                 
-                print(f"   Connection method: Cloud SQL Connector")
+                print(f"   Connection method: Cloud SQL Connector (pg8000)")
                 print(f"   Connection name: {connection_name}")
                 
                 # Initialize the Cloud SQL Python Connector
@@ -58,18 +185,70 @@ class UnifiedDatabaseAdapter(DatabaseInterface):
                     """Get a connection using the Cloud SQL Python Connector."""
                     conn = connector.connect(
                         connection_name,
-                        "psycopg2",
+                        "pg8000",
                         user=os.getenv('CLOUD_SQL_USERNAME'),
                         password=os.getenv('CLOUD_SQL_PASSWORD'),
                         db=os.getenv('CLOUD_SQL_DATABASE_NAME'),
                     )
-                    return conn
+                    # Wrap pg8000 connection to make it compatible with psycopg2 API
+                    return PG8000ConnectionWrapper(conn)
                 
-                # Create connection pool using the connector
-                connection_pool = psycopg2.pool.SimpleConnectionPool(
-                    1, 20,  # min and max connections
-                    connection_factory=getconn
-                )
+                # Create a custom connection pool for Cloud SQL Connector
+                class CloudSQLConnectionPool:
+                    def __init__(self, minconn, maxconn, getconn_func):
+                        self.minconn = minconn
+                        self.maxconn = maxconn
+                        self.getconn_func = getconn_func
+                        self._pool = []
+                        self._used = set()
+                        
+                        # Pre-create minimum connections
+                        for _ in range(minconn):
+                            conn = self.getconn_func()
+                            self._pool.append(conn)
+                    
+                    def getconn(self):
+                        if self._pool:
+                            conn = self._pool.pop()
+                            self._used.add(conn)
+                            return conn
+                        elif len(self._used) < self.maxconn:
+                            conn = self.getconn_func()
+                            self._used.add(conn)
+                            return conn
+                        else:
+                            raise Exception("Connection pool exhausted")
+                    
+                    def putconn(self, conn):
+                        if conn in self._used:
+                            self._used.remove(conn)
+                            # Check if connection is still valid
+                            try:
+                                with conn.cursor() as cursor:
+                                    cursor.execute("SELECT 1")
+                                self._pool.append(conn)
+                            except Exception:
+                                # Connection is bad, don't return to pool
+                                try:
+                                    conn.close()
+                                except:
+                                    pass
+                    
+                    def closeall(self):
+                        for conn in self._pool:
+                            try:
+                                conn.close()
+                            except:
+                                pass
+                        for conn in self._used:
+                            try:
+                                conn.close()
+                            except:
+                                pass
+                        self._pool.clear()
+                        self._used.clear()
+                
+                connection_pool = CloudSQLConnectionPool(1, 20, getconn)
                 
             elif use_cloud_sql:
                 # Development with Cloud SQL Proxy
