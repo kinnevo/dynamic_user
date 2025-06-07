@@ -13,7 +13,7 @@ from typing import Optional # Added for type hinting
 # db_adapter = get_db()  # Use singleton instance
 
 @ui.page('/chat')
-@auth_required
+# @auth_required # TODO: Uncomment this when done debugging
 async def chat_page():
     """Chat interface with sidebar for managing multiple chat sessions."""
     create_navigation_menu_2()
