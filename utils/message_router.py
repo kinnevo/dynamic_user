@@ -62,9 +62,11 @@ class MessageRouter:
             
             print(f"MessageRouter: User Firebase UID: {firebase_uid}, Display Name: {display_name}")
             
-            # Save user message to database with Firebase UID and display name
+            # 🚀 PARALLEL PHASE 1: Operations that can run in parallel
             db_start = time.time()
-            user_message_id = await db_adapter.save_message(
+            
+            # Run these operations in parallel since they don't depend on each other
+            save_user_task = db_adapter.save_message(
                 user_email=user_email,
                 session_id=session_id,
                 content=message,
@@ -72,78 +74,91 @@ class MessageRouter:
                 firebase_uid=firebase_uid,
                 display_name=display_name
             )
-            save_user_msg_time = int((time.time() - db_start) * 1000)
+            
+            history_task = db_adapter.get_conversation_history(session_id)
+            
+            status_update_task = db_adapter.update_user_status(
+                identifier=user_email, 
+                status="Active", 
+                is_email=True
+            )
+            
+            # Wait for all parallel operations to complete
+            user_message_id, history, _ = await asyncio.gather(
+                save_user_task,
+                history_task,
+                status_update_task
+            )
+            
+            parallel_db_time = int((time.time() - db_start) * 1000)
             
             if not user_message_id:
                 print(f"Error saving user message for {user_email} in chat {session_id}. Aborting.")
                 return {"error": "Failed to save user message."}
-            # print(f"MessageRouter: User message saved with ID: {user_message_id}")
             
-            # Get conversation history for context, using the session_id
-            db_start = time.time()
-            history = await db_adapter.get_conversation_history(session_id)
-            history_time = int((time.time() - db_start) * 1000)
-            # print(f"MessageRouter: Fetched history for chat {session_id}. Number of messages: {len(history)}")
-            
-            # Update user status to Active (identified by email)
-            db_start = time.time()
-            await db_adapter.update_user_status(identifier=user_email, status="Active", is_email=True)
-            status_update1_time = int((time.time() - db_start) * 1000)
-            
-            # Send to FILC Agent API and track processing time
+            # 🎯 SEQUENTIAL PHASE: API call (needs history)
             api_start_time = time.time()
-            # print(f"MessageRouter: Calling FilcAgentClient.process_message for chat {session_id}")
             response_from_agent = await self.filc_client.process_message(
                 message=message,
-                session_id=session_id, # Assuming filc_client uses this as a context/history key
+                session_id=session_id,
                 history=history
-                # Potentially pass user_email or a user identifier if filc_client needs it
             )
-            api_processing_time_ms = int((time.time() - api_start_time) * 1000)  # Convert to milliseconds
-            # print(f"MessageRouter: Received response from agent: {json.dumps(response_from_agent, indent=2)}")
+            api_processing_time_ms = int((time.time() - api_start_time) * 1000)
             
-            # Extract response text
+            # Extract response text immediately
             response_text = self._extract_response_text(response_from_agent)
-            # print(f"MessageRouter: Extracted response text: '{response_text}'")
             
-            # Save assistant response to database with Firebase UID and processing time
-            db_start = time.time()
-            if response_text:
-                assistant_message_id = await db_adapter.save_message(
-                    user_email=user_email,
-                    session_id=session_id,
-                    content=response_text,
-                    role="assistant",
-                    firebase_uid=firebase_uid,
-                    display_name=display_name,
-                    model_used="FILC Agent",  # Specify the model used
-                    processing_time=api_processing_time_ms
-                )
-                # print(f"MessageRouter: Assistant response saved with ID: {assistant_message_id}")
-            else:
-                # Handle cases where response_text might be empty or None from _extract_response_text
-                print(f"No valid response text extracted from agent for chat {session_id}. Not saving assistant message.")
-            save_assistant_msg_time = int((time.time() - db_start) * 1000)
+            # Calculate time up to user response
+            user_response_time = int((time.time() - total_start_time) * 1000)
             
-            # Update user status (e.g., "Completed" could mean completed this interaction cycle)
-            db_start = time.time()
-            await db_adapter.update_user_status(identifier=user_email, status="CompletedInteraction", is_email=True)
-            status_update2_time = int((time.time() - db_start) * 1000)
+            # 🔥 BACKGROUND PHASE: Fire-and-forget operations after user gets response
+            async def background_operations():
+                """Run non-critical operations in background"""
+                try:
+                    bg_start = time.time()
+                    
+                    # Save assistant response and final status update in parallel
+                    save_assistant_task = None
+                    if response_text:
+                        save_assistant_task = db_adapter.save_message(
+                            user_email=user_email,
+                            session_id=session_id,
+                            content=response_text,
+                            role="assistant",
+                            firebase_uid=firebase_uid,
+                            display_name=display_name,
+                            model_used="FILC Agent",
+                            processing_time=api_processing_time_ms
+                        )
+                    
+                    final_status_task = db_adapter.update_user_status(
+                        identifier=user_email, 
+                        status="CompletedInteraction", 
+                        is_email=True
+                    )
+                    
+                    # Run background operations in parallel
+                    if save_assistant_task:
+                        await asyncio.gather(save_assistant_task, final_status_task)
+                    else:
+                        await final_status_task
+                    
+                    bg_time = int((time.time() - bg_start) * 1000)
+                    print(f"🔥 Background operations completed in {bg_time}ms")
+                    
+                except Exception as e:
+                    print(f"❌ Error in background operations: {e}")
             
-            # Calculate total times
-            total_processing_time = int((time.time() - total_start_time) * 1000)
-            total_db_time = db_init_time + save_user_msg_time + history_time + status_update1_time + save_assistant_msg_time + status_update2_time
+            # Start background operations (fire-and-forget)
+            asyncio.create_task(background_operations())
             
-            # Log performance breakdown
-            print(f"⏱️  Performance breakdown (ms):")
-            print(f"   Total: {total_processing_time}ms")
-            print(f"   API Call: {api_processing_time_ms}ms ({api_processing_time_ms/total_processing_time*100:.1f}%)")
-            print(f"   Database: {total_db_time}ms ({total_db_time/total_processing_time*100:.1f}%)")
-            print(f"   - DB Init: {db_init_time}ms")
-            print(f"   - Save User Msg: {save_user_msg_time}ms")
-            print(f"   - Get History: {history_time}ms")
-            print(f"   - Status Updates: {status_update1_time + status_update2_time}ms")
-            print(f"   - Save Assistant Msg: {save_assistant_msg_time}ms")
+            # Log performance breakdown (only up to user response)
+            print(f"⚡ Fast response performance (ms):")
+            print(f"   User Response Time: {user_response_time}ms")
+            print(f"   API Call: {api_processing_time_ms}ms ({api_processing_time_ms/user_response_time*100:.1f}%)")
+            print(f"   Parallel DB Ops: {parallel_db_time}ms ({parallel_db_time/user_response_time*100:.1f}%)")
+            print(f"   DB Init: {db_init_time}ms")
+            print(f"   🔥 Background ops: Running async...")
             
             result = {
                 "content": response_text if response_text else "No response content from assistant.",
@@ -154,7 +169,6 @@ class MessageRouter:
                 result["error"] = response_from_agent.get("error")
                 result["error_type"] = "non_critical"
                 
-            # print(f"MessageRouter: Successfully processed. Returning to UI: {json.dumps(result, indent=2)}")
             return result
             
         except Exception as e:
