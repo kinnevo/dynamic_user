@@ -78,16 +78,64 @@ class FilcAgentClient:
     async def process_message(self, message: str, session_id: str, 
                               history: List[Dict[str, str]] = None) -> Dict[str, Any]:
         """Send a message to the FILC Agent API and get a response"""
-        # In this API we don't directly pass history but could use it to build context
-        context = {"history": history} if history else {}
-        
+        # Prepare the payload with proper conversation_history format
         payload = {
             "message": message,
             "session_id": session_id,
-            "context": context
+            "context": {}
         }
         
-        # print(f"FILC Agent: Sending payload to {self.base_url}{self.chat_endpoint}: {json.dumps(payload, indent=2)}")
+        # Handle conversation history
+        if history and len(history) > 0:
+            # Use provided history and format it correctly for the API
+            conversation_history = []
+            for msg in history:
+                if isinstance(msg, dict) and 'role' in msg and 'content' in msg:
+                    conversation_history.append({
+                        "role": msg['role'],
+                        "content": msg['content']
+                    })
+            
+            if conversation_history:
+                payload["conversation_history"] = conversation_history
+                print(f"FILC Agent: Using provided conversation history with {len(conversation_history)} messages")
+        
+        elif history is not None and len(history) == 0:
+            # History was explicitly passed as empty, check if this is an existing conversation
+            # that might need history from the database
+            try:
+                from utils.database_singleton import get_db
+                db_adapter = await get_db()
+                
+                # Check if this session has any previous messages
+                existing_history = await db_adapter.get_conversation_history(session_id)
+                
+                if existing_history and len(existing_history) > 0:
+                    # This is an existing conversation, get last 10 messages for context
+                    last_messages = existing_history[-10:] if len(existing_history) > 10 else existing_history
+                    
+                    conversation_history = []
+                    for msg in last_messages:
+                        if isinstance(msg, dict) and 'role' in msg and 'content' in msg:
+                            conversation_history.append({
+                                "role": msg['role'],
+                                "content": msg['content']
+                            })
+                    
+                    if conversation_history:
+                        payload["conversation_history"] = conversation_history
+                        print(f"FILC Agent: Retrieved and using last {len(conversation_history)} messages from DB for existing conversation")
+                else:
+                    print(f"FILC Agent: New conversation detected, no history added")
+                    
+            except Exception as e:
+                print(f"FILC Agent: Warning - Could not fetch conversation history from DB: {e}")
+                # Continue without history - this is not a critical error
+        
+        # If no history was provided at all (None), this is likely a new conversation
+        # and we don't need to add conversation_history
+        
+        # print(f"FILC Agent: Sending payload to {self.base_url}{self.chat_endpoint}")
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
