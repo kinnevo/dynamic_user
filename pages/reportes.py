@@ -21,7 +21,7 @@ except LookupError:
     nltk.download('stopwords')
 
 @ui.page('/reportes')
-# @auth_required # TODO: Uncomment this when done debugging
+@auth_required 
 async def reportes_page():
     # Initialize async database adapter inside function
     db_adapter = await get_db()
