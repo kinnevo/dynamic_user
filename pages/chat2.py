@@ -202,7 +202,7 @@ async def chat_page():
             chat_list_ui = ui.column().classes('w-full gap-1 mt-2')
 
     # Main content area with improved layout to eliminate bottom whitespace
-    with ui.element('div').classes('flex flex-col w-full').style('height: calc(100vh - 64px);'):  # 64px for header height
+    with ui.element('div').classes('flex flex-col w-full').style('height: calc(100vh - 10.8vh); max-height: calc(100vh - 4vh);'):  # Account for header + navigation + padding
         # Messages area - takes up available space
         with ui.element('div').classes('flex-1 w-full relative overflow-hidden'):
             messages_container = ui.column().classes(
