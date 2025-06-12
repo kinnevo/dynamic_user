@@ -75,7 +75,7 @@ def create_navigation_menu_2():
             with ui.element('div').classes('max-sm:hidden'):
                 # Create menu first
                 with ui.menu().classes('mt-2') as user_menu:
-                    with ui.menu_item('Profile'):
+                    with ui.menu_item('Profile'): #, on_click=lambda: ui.navigate.to('/profile') # TODO: Uncomment this when deploy ready
                         ui.icon('person')
                     with ui.menu_item('Settings'):
                         ui.icon('settings')
@@ -97,7 +97,7 @@ def create_navigation_menu_2():
                     with ui.menu_item('Reports', on_click=lambda: ui.navigate.to('/reportes')):
                         ui.icon('analytics')
                     ui.separator()
-                    with ui.menu_item('Profile'):
+                    with ui.menu_item('Profile', on_click=lambda: ui.navigate.to('/profile')):
                         ui.icon('person')
                     with ui.menu_item('Settings'):
                         ui.icon('settings')

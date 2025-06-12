@@ -9,8 +9,8 @@ from utils.auth_middleware import auth_required
 from pages.reportes import reportes_page
 from pages.admin import page_admin
 from pages.chat import chat_page
-from pages.chat2 import chat_page
 from pages.home import home
+# from pages.profile import profile_page
 from pages.login import login_page
 from pages.register import register_page
 from pages.reset_password import reset_password_page
