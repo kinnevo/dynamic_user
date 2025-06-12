@@ -1173,7 +1173,7 @@ class AdminPageManager:
         ''') # Keep existing styles/scripts
 
 @ui.page('/admin')
-# @auth_required # TODO: Uncomment this when done debugging
+@auth_required 
 def page_admin():
     """Admin page handler - creates a new manager instance for each session."""
     # Create a new manager instance for this session
