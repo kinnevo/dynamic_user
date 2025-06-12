@@ -201,10 +201,10 @@ async def chat_page():
             # Container for the list of chats (will be @ui.refreshable)
             chat_list_ui = ui.column().classes('w-full gap-1 mt-2')
 
-    # Main chat area
-    with ui.column().classes('w-full h-screen p-0 m-0 flex flex-col').style('height: 82vh'): # Custom height override for header
-        # Use a div with relative positioning to act as a container for messages_container and spinner
-        with ui.element('div').classes('flex-grow w-full relative overflow-hidden'):
+    # Main content area with improved layout to eliminate bottom whitespace
+    with ui.element('div').classes('flex flex-col w-full').style('height: calc(100vh - 64px);'):  # 64px for header height
+        # Messages area - takes up available space
+        with ui.element('div').classes('flex-1 w-full relative overflow-hidden'):
             messages_container = ui.column().classes(
                 'absolute inset-0 overflow-y-auto p-4 gap-2' 
             )
@@ -214,9 +214,9 @@ async def chat_page():
             )
             if spinner: spinner.visible = False # Start hidden
         
-        # Input area (styled as footer but using regular row)
-        with ui.row().classes('w-full p-4 bg-white border-t items-center gap-2'):
-            message_input = ui.input(placeholder='Escribe tu mensaje...').classes('w-full')
+        # Input area - fixed at bottom with no extra margin/padding
+        with ui.row().classes('flex-shrink-0 w-full p-4 bg-white border-t items-center gap-2').style('margin: 0; padding-bottom: 16px;'):
+            message_input = ui.input(placeholder='Escribe tu mensaje...').classes('flex-1')
             
             # Send button - define the function first, then use it
             send_button = ui.button('Send', on_click=lambda: send_current_message()).classes('bg-blue-500 text-white')
