@@ -7,7 +7,6 @@ from nicegui import app
 import json
 import requests
 from typing import Optional
-import base64
 
 # Load environment variables
 load_dotenv()
@@ -89,18 +88,6 @@ class FirebaseManager:
 
         # Initialize Firebase Admin SDK (for server-side operations)
         service_account_json = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
-        
-        # Try base64-encoded version if JSON version is not available
-        if not service_account_json:
-            service_account_b64 = os.getenv("FIREBASE_SERVICE_ACCOUNT_B64")
-            if service_account_b64:
-                try:
-                    print("Loading Firebase Admin SDK with base64-encoded credentials...")
-                    service_account_json = base64.b64decode(service_account_b64).decode('utf-8')
-                    print("Successfully decoded base64 Firebase credentials")
-                except Exception as e:
-                    print(f"Error decoding base64 Firebase credentials: {e}")
-        
         cred = None
         if service_account_json:
             try:
