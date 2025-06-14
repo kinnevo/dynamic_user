@@ -95,7 +95,7 @@ async def chat_page():
                                     ui.image('https://robohash.org/assistant?bgset=bg1&size=32x32').classes('rounded-full')
                                 with ui.element('div').classes('bg-gray-200 p-3 rounded-lg max-w-[80%]'):
                                     ui.markdown(message['content'])
-            await scroll_to_bottom()
+            scroll_to_bottom()
             if message_input: message_input.enable()
         except Exception as e:
             print(f"Error loading chat history for {chat_id}: {e}")
@@ -107,81 +107,18 @@ async def chat_page():
             if spinner: spinner.visible = False
         update_chat_list.refresh() # update_chat_list is a refreshable function in scope
 
-    async def scroll_to_bottom():
-        """Enhanced scroll function with multiple fallback methods."""
-        nonlocal messages_container
-        if not messages_container:
-            return
-            
+    def scroll_to_bottom():
+        """Simple and reliable scroll function."""
         try:
-            # Enhanced JavaScript scroll with multiple methods
-            ui.run_javascript(f'''
-                setTimeout(() => {{
-                    let scrolled = false;
-                    
-                    // Method 1: Try to find the specific messages container
-                    try {{
-                        const el = document.querySelector('[class*="absolute"][class*="inset-0"][class*="overflow-y-auto"]');
-                        if (el) {{
-                            el.scrollTop = el.scrollHeight;
-                            console.log('Scrolled using messages container');
-                            scrolled = true;
-                        }}
-                    }} catch (e) {{
-                        console.log('Messages container method failed:', e);
-                    }}
-                    
-                    // Method 2: Find any scrollable overflow-y-auto container
-                    if (!scrolled) {{
-                        try {{
-                            const containers = document.querySelectorAll('[class*="overflow-y-auto"]');
-                            for (let container of containers) {{
-                                if (container.scrollHeight > container.clientHeight) {{
-                                    container.scrollTop = container.scrollHeight;
-                                    console.log('Scrolled using overflow container');
-                                    scrolled = true;
-                                    break;
-                                }}
-                            }}
-                        }} catch (e) {{
-                            console.log('Overflow method failed:', e);
-                        }}
-                    }}
-                    
-                    // Method 3: Scroll to bottom using a more specific selector
-                    if (!scrolled) {{
-                        try {{
-                            const chatContainer = document.querySelector('.q-page-container');
-                            if (chatContainer) {{
-                                const scrollableElement = chatContainer.querySelector('[class*="overflow-y-auto"]');
-                                if (scrollableElement) {{
-                                    scrollableElement.scrollTop = scrollableElement.scrollHeight;
-                                    console.log('Scrolled using page container method');
-                                    scrolled = true;
-                                }}
-                            }}
-                        }} catch (e) {{
-                            console.log('Page container method failed:', e);
-                        }}
-                    }}
-                    
-                    if (!scrolled) {{
-                        console.log('All scroll methods failed');
-                    }}
-                }}, 100);
-            ''')
-            
-            # Add a small delay and try again if needed
-            await asyncio.sleep(0.2)
             ui.run_javascript('''
-                // Final fallback - scroll any element that looks like a chat container
-                const allElements = document.querySelectorAll('*');
-                for (let el of allElements) {
-                    if (el.scrollHeight > el.clientHeight && el.scrollHeight > 200) {
-                        el.scrollTop = el.scrollHeight;
-                        break;
+                // Simple direct scroll approach
+                setTimeout(() => {
+                    // Find the scrollable container
+                    const scrollable = document.querySelector('[class*="overflow-y-auto"]');
+                    if (scrollable) {
+                        scrollable.scrollTop = scrollable.scrollHeight;
                     }
-                }
+                }, 100);
             ''')
         except Exception as e:
             print(f"Scroll error: {e}")
@@ -219,29 +156,41 @@ async def chat_page():
             with ui.avatar(size='md').classes('flex-shrink-0'):
                 ui.image(avatar_url).classes('rounded-full')
                 
+            # Create textarea with proper event handling
             message_input = ui.textarea(placeholder='Escribe tu mensaje... (Shift+Enter para nueva línea)') \
                 .classes('flex-grow') \
-                .props('outlined dense rows=1 auto-grow @keydown.enter="handleEnter"')
+                .props('outlined dense rows=1 auto-grow')
             
-            # Add the JavaScript handler for Enter key
-            ui.add_head_html('''
+            # Handle Enter key with better event prevention
+            def handle_keydown(e):
+                key = e.args.get('key')
+                shift_key = e.args.get('shiftKey', False)
+                
+                if key == 'Enter' and not shift_key:
+                    # Enter without Shift: Send message
+                    if message_input.value.strip():
+                        asyncio.create_task(send_current_message())
+            
+            message_input.on('keydown', handle_keydown)
+            
+            # Add JavaScript to prevent Enter from adding newlines
+            ui.add_head_html(f'''
                 <script>
-                window.handleEnter = function(event) {
-                    if (!event.shiftKey) {
-                        event.preventDefault();
-                        // Trigger send if there's content
-                        const textarea = event.target;
-                        if (textarea.value.trim()) {
-                            // We'll trigger the send via a custom event
-                            textarea.dispatchEvent(new CustomEvent('send-message'));
-                        }
-                    }
-                };
+                document.addEventListener('DOMContentLoaded', function() {{
+                    setTimeout(() => {{
+                        const textarea = document.getElementById('c{message_input.id}');
+                        if (textarea) {{
+                            textarea.addEventListener('keydown', function(e) {{
+                                if (e.key === 'Enter' && !e.shiftKey) {{
+                                    e.preventDefault();
+                                }}
+                            }});
+                        }}
+                    }}, 100);
+                }});
                 </script>
             ''')
             
-            # Listen for the custom send-message event
-            message_input.on('send-message', lambda: asyncio.create_task(send_current_message()))
             send_button = ui.button(icon='send', on_click=lambda: send_current_message()).props('round flat color=primary')
             
     # --- Chat Logic & Refreshable Components ---
@@ -306,7 +255,7 @@ async def chat_page():
             message_input.enable()
             message_input.value = ''
         update_chat_list.refresh() 
-        await scroll_to_bottom()
+        scroll_to_bottom()
 
     async def send_current_message():
         nonlocal messages_container, message_input, spinner, send_button # These are accessed/modified
@@ -326,8 +275,7 @@ async def chat_page():
         
         message_input.value = '' # Clear input immediately
         
-        # Disable send button and show spinner
-        if send_button: send_button.visible = False
+        # Show spinner (keep send button visible)
         if spinner: spinner.visible = True
 
         if not messages_container: return
@@ -340,7 +288,7 @@ async def chat_page():
                     ui.image(generate_user_avatar(user_email)).classes('rounded-full')
         
         # Small delay to ensure DOM is updated, then scroll
-        await scroll_to_bottom()
+        scroll_to_bottom()
 
         try:
             response_data = await message_router.process_user_message(
@@ -365,7 +313,7 @@ async def chat_page():
                         ui.markdown(assistant_response_content)
             
             # Small delay to ensure DOM is updated, then scroll
-            await scroll_to_bottom()
+            scroll_to_bottom()
 
             if response_data.get("error") and response_data.get("error_type") == "non_critical":
                 ui.notify(f"Nota: {response_data['error']}", type='warning', timeout=5000)
@@ -382,10 +330,9 @@ async def chat_page():
                          ui.image('https://robohash.org/error?bgset=bg1&size=32x32').classes('rounded-full')
                      with ui.element('div').classes('bg-red-100 text-red-700 p-3 rounded-lg max-w-[80%] border-l-4 border-red-500'):
                         ui.markdown(f"**⚠️ Error del Sistema**\n\nNo se pudo obtener respuesta: {e}")
-            await scroll_to_bottom()
+            scroll_to_bottom()
         finally:
             if spinner: spinner.visible = False
-            if send_button: send_button.visible = True
 
         update_chat_list.refresh() # Refresh sidebar, timestamps might have updated
 
