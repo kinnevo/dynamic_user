@@ -51,13 +51,13 @@ async def chat_page():
 
 
     async def load_and_display_chat_history(chat_id: str):
-        nonlocal messages_container, message_input, spinner # Ensure these are from chat_page scope
+        nonlocal messages_container, messages_column, message_input, spinner # Ensure these are from chat_page scope
         
-        if not messages_container: return
-        messages_container.clear()
+        if not messages_column: return
+        messages_column.clear()
 
         if not chat_id:
-            with messages_container:
+            with messages_column:
                 ui.label("Select a chat or start a new one.").classes('text-center m-auto')
             if message_input: message_input.disable()
             return
@@ -68,10 +68,10 @@ async def chat_page():
         if spinner: spinner.visible = True
         try:
             history = await asyncio.to_thread(db_adapter.get_recent_messages, session_id=chat_id, limit=100)
-            if not messages_container: return 
+            if not messages_column: return 
             
             if not history:
-                with messages_container:
+                with messages_column:
                     # Welcome message with assistant avatar
                     with ui.row().classes('justify-start items-end gap-2 w-full'):
                         with ui.avatar(size='sm').classes('flex-shrink-0'):
@@ -79,7 +79,7 @@ async def chat_page():
                         with ui.element('div').classes('bg-gray-200 p-3 rounded-lg max-w-[80%]'):
                             ui.markdown("Bienvenido! Describe tu idea y desarrollemosla juntos.")
             else:
-                with messages_container:
+                with messages_column:
                     for message in history:
                         if message['role'] == 'user':
                             # User message with avatar
@@ -95,65 +95,29 @@ async def chat_page():
                                     ui.image('https://robohash.org/assistant?bgset=bg1&size=32x32').classes('rounded-full')
                                 with ui.element('div').classes('bg-gray-200 p-3 rounded-lg max-w-[80%]'):
                                     ui.markdown(message['content'])
-            scroll_to_bottom()
+            # Direct scroll using the scroll area - like in reference script
+            messages_container.scroll_to(percent=1e6)
             if message_input: message_input.enable()
         except Exception as e:
             print(f"Error loading chat history for {chat_id}: {e}")
             ui.notify(f"Error al cargar el historial del chat: {e}", type='negative')
-            if messages_container:
-                with messages_container:
+            if messages_column:
+                with messages_column:
                     ui.label(f"Error al cargar el chat {chat_id}.").classes('text-negative')
         finally:
             if spinner: spinner.visible = False
         update_chat_list.refresh() # update_chat_list is a refreshable function in scope
 
     def scroll_to_bottom():
-        """Direct scroll using the messages container ID."""
+        """Direct scroll using NiceGUI scroll_area method - like reference script."""
         nonlocal messages_container
-        if not messages_container:
-            return
-            
-        try:
-            # Use the actual container ID for direct targeting
-            ui.run_javascript(f'''
-                // Direct approach using container ID
-                function scrollToBottomDirect() {{
-                    // Method 1: Use the specific container ID
-                    const container = document.getElementById('c{messages_container.id}');
-                    if (container) {{
-                        container.scrollTop = container.scrollHeight;
-                        console.log('Scrolled messages container by ID');
-                        return true;
-                    }}
-                    
-                    // Method 2: Find parent container that's scrollable
-                    const scrollableParent = document.querySelector('[class*="overflow-y-auto"]');
-                    if (scrollableParent) {{
-                        scrollableParent.scrollTop = scrollableParent.scrollHeight;
-                        console.log('Scrolled parent container');
-                        return true;
-                    }}
-                    
-                    // Method 3: Scroll any large scrollable element
-                    const allDivs = document.querySelectorAll('div');
-                    for (let div of allDivs) {{
-                        if (div.scrollHeight > div.clientHeight && div.scrollHeight > 300) {{
-                            div.scrollTop = div.scrollHeight;
-                            console.log('Scrolled large div');
-                            return true;
-                        }}
-                    }}
-                    
-                    console.log('No scrollable container found');
-                    return false;
-                }}
-                
-                // Execute immediately
-                scrollToBottomDirect();
-            ''')
-        except Exception as e:
-            print(f"Scroll error: {e}")
-            pass
+        if messages_container:
+            try:
+                # Direct method like in reference script
+                messages_container.scroll_to(percent=1e6)
+            except Exception as e:
+                print(f"Scroll error: {e}")
+                pass
 
     # --- Main UI Structure ---
     # Sidebar for chat sessions
@@ -168,16 +132,17 @@ async def chat_page():
 
     # Main chat area
     with ui.column().classes('w-full h-screen p-0 m-0 flex flex-col ').style('height: 89vh'): # Custom height override
-        # Use a div with relative positioning to act as a container for messages_container and spinner
-        with ui.element('div').classes('flex-grow w-full relative overflow-hidden'):
-            messages_container = ui.column().classes(
-                'absolute inset-0 overflow-y-auto p-4 gap-2' 
-            )
-            # Enhanced spinner with better positioning and size
-            spinner = ui.spinner('audio', size='xl', color='primary').classes(
-                'absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50'
-            )
-            if spinner: spinner.visible = False # Start hidden
+        # Use ui.scroll_area like in the reference script for better scroll control
+        messages_container = ui.scroll_area().classes('flex-grow w-full p-4')
+        with messages_container:
+            # Container for messages inside the scroll area
+            messages_column = ui.column().classes('gap-2 w-full')
+        
+        # Enhanced spinner positioned over the scroll area
+        spinner = ui.spinner('audio', size='xl', color='primary').classes(
+            'fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50'
+        )
+        if spinner: spinner.visible = False # Start hidden
         
         # Input area (footer) with user avatar
         with ui.row().classes('w-full p-4 bg-gray-50 border-t items-center gap-3'):
@@ -192,15 +157,15 @@ async def chat_page():
                 .classes('flex-grow') \
                 .props('outlined dense rows=1 auto-grow')
             
-            # Handle Enter key with immediate response
+                        # Handle Enter key with immediate response
             def handle_keydown(e):
                 key = e.args.get('key')
                 shift_key = e.args.get('shiftKey', False)
                 
                 if key == 'Enter' and not shift_key:
-                    # Enter without Shift: Send message immediately  
+                    # Enter without Shift: Send message immediately - no delays
                     if message_input.value.strip():
-                        # Direct async call - no timer delay
+                        # Send message and let the async function handle scrolling
                         asyncio.create_task(send_current_message())
             
             message_input.on('keydown', handle_keydown)
@@ -264,13 +229,13 @@ async def chat_page():
         await load_and_display_chat_history(chat_id) 
 
     async def start_new_chat():
-        nonlocal messages_container, message_input # These are modified
+        nonlocal messages_container, messages_column, message_input # These are modified
         new_id = str(uuid.uuid4())
         app.storage.user['active_chat_id'] = new_id
         print(f"Starting new chat with ID: {new_id}")
-        if messages_container:
-            messages_container.clear()
-            with messages_container:
+        if messages_column:
+            messages_column.clear()
+            with messages_column:
                  # New chat welcome message with assistant avatar
                  with ui.row().classes('justify-start items-end gap-2 w-full'):
                      with ui.avatar(size='sm').classes('flex-shrink-0'):
@@ -281,10 +246,11 @@ async def chat_page():
             message_input.enable()
             message_input.value = ''
         update_chat_list.refresh() 
-        scroll_to_bottom()
+        # Direct scroll like reference script
+        messages_container.scroll_to(percent=1e6)
 
     async def send_current_message():
-        nonlocal messages_container, message_input, spinner, send_button # These are accessed/modified
+        nonlocal messages_container, messages_column, message_input, spinner, send_button # These are accessed/modified
         user_email = app.storage.user.get('user_email')
         active_chat_id = app.storage.user.get('active_chat_id')
         
@@ -304,8 +270,8 @@ async def chat_page():
         # Show spinner (keep send button visible)
         if spinner: spinner.visible = True
 
-        if not messages_container: return
-        with messages_container:
+        if not messages_column: return
+        with messages_column:
             # User message with avatar
             with ui.row().classes('justify-end items-end gap-2 w-full'):
                 with ui.element('div').classes('bg-blue-500 text-white p-3 rounded-lg max-w-[80%]'):
@@ -313,9 +279,8 @@ async def chat_page():
                 with ui.avatar(size='sm').classes('flex-shrink-0'):
                     ui.image(generate_user_avatar(user_email)).classes('rounded-full')
         
-        # Immediate scroll + delayed scroll for DOM updates
-        scroll_to_bottom()
-        ui.timer(0.05, scroll_to_bottom, once=True)  # Additional scroll after DOM update
+        # Immediate scroll after user message - like reference script
+        messages_container.scroll_to(percent=1e6)
 
         try:
             response_data = await message_router.process_user_message(
@@ -331,7 +296,7 @@ async def chat_page():
                  assistant_response_content = f"Error del asistente: {response_data.get('error')}"
 
             # The assistant's message is saved by MessageRouter. Display it.
-            with messages_container:
+            with messages_column:
                 # Assistant message with system avatar
                 with ui.row().classes('justify-start items-end gap-2 w-full'):
                     with ui.avatar(size='sm').classes('flex-shrink-0'):
@@ -339,9 +304,8 @@ async def chat_page():
                     with ui.element('div').classes('bg-gray-200 p-3 rounded-lg max-w-[80%]'):
                         ui.markdown(assistant_response_content)
             
-            # Immediate scroll + delayed scroll for DOM updates
-            scroll_to_bottom()
-            ui.timer(0.05, scroll_to_bottom, once=True)  # Additional scroll after DOM update
+            # Immediate scroll after AI message - like reference script
+            messages_container.scroll_to(percent=1e6)
 
             if response_data.get("error") and response_data.get("error_type") == "non_critical":
                 ui.notify(f"Nota: {response_data['error']}", type='warning', timeout=5000)
@@ -351,14 +315,15 @@ async def chat_page():
         except Exception as e:
             print(f"Critical error calling message router: {e}")
             ui.notify(f"Error crítico del sistema: {e}", type='negative')
-            with messages_container:
+            with messages_column:
                  # Error message with system avatar
                  with ui.row().classes('justify-start items-end gap-2 w-full'):
                      with ui.avatar(size='sm').classes('flex-shrink-0'):
                          ui.image('https://robohash.org/error?bgset=bg1&size=32x32').classes('rounded-full')
                      with ui.element('div').classes('bg-red-100 text-red-700 p-3 rounded-lg max-w-[80%] border-l-4 border-red-500'):
                         ui.markdown(f"**⚠️ Error del Sistema**\n\nNo se pudo obtener respuesta: {e}")
-            scroll_to_bottom()
+            # Immediate scroll after error message
+            messages_container.scroll_to(percent=1e6)
         finally:
             if spinner: spinner.visible = False
 
@@ -384,9 +349,9 @@ async def chat_page():
             await load_and_display_chat_history(most_recent_chat_id)
             # update_chat_list.refresh() # load_and_display_chat_history already calls this
         else:
-            if messages_container: messages_container.clear()
-            if messages_container:
-                with messages_container:
+            if messages_column: messages_column.clear()
+            if messages_column:
+                with messages_column:
                     # Default welcome message with assistant avatar
                     with ui.row().classes('justify-start items-end gap-2 w-full'):
                         with ui.avatar(size='sm').classes('flex-shrink-0'):
