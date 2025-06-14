@@ -108,17 +108,48 @@ async def chat_page():
         update_chat_list.refresh() # update_chat_list is a refreshable function in scope
 
     def scroll_to_bottom():
-        """Simple and reliable scroll function."""
+        """Direct scroll using the messages container ID."""
+        nonlocal messages_container
+        if not messages_container:
+            return
+            
         try:
-            ui.run_javascript('''
-                // Simple direct scroll approach
-                setTimeout(() => {
-                    // Find the scrollable container
-                    const scrollable = document.querySelector('[class*="overflow-y-auto"]');
-                    if (scrollable) {
-                        scrollable.scrollTop = scrollable.scrollHeight;
-                    }
-                }, 100);
+            # Use the actual container ID for direct targeting
+            ui.run_javascript(f'''
+                // Direct approach using container ID
+                function scrollToBottomDirect() {{
+                    // Method 1: Use the specific container ID
+                    const container = document.getElementById('c{messages_container.id}');
+                    if (container) {{
+                        container.scrollTop = container.scrollHeight;
+                        console.log('Scrolled messages container by ID');
+                        return true;
+                    }}
+                    
+                    // Method 2: Find parent container that's scrollable
+                    const scrollableParent = document.querySelector('[class*="overflow-y-auto"]');
+                    if (scrollableParent) {{
+                        scrollableParent.scrollTop = scrollableParent.scrollHeight;
+                        console.log('Scrolled parent container');
+                        return true;
+                    }}
+                    
+                    // Method 3: Scroll any large scrollable element
+                    const allDivs = document.querySelectorAll('div');
+                    for (let div of allDivs) {{
+                        if (div.scrollHeight > div.clientHeight && div.scrollHeight > 300) {{
+                            div.scrollTop = div.scrollHeight;
+                            console.log('Scrolled large div');
+                            return true;
+                        }}
+                    }}
+                    
+                    console.log('No scrollable container found');
+                    return false;
+                }}
+                
+                // Execute immediately
+                scrollToBottomDirect();
             ''')
         except Exception as e:
             print(f"Scroll error: {e}")
@@ -161,34 +192,29 @@ async def chat_page():
                 .classes('flex-grow') \
                 .props('outlined dense rows=1 auto-grow')
             
-            # Handle Enter key with better event prevention
+            # Handle Enter key with immediate response
             def handle_keydown(e):
                 key = e.args.get('key')
                 shift_key = e.args.get('shiftKey', False)
                 
                 if key == 'Enter' and not shift_key:
-                    # Enter without Shift: Send message
+                    # Enter without Shift: Send message immediately  
                     if message_input.value.strip():
+                        # Direct async call - no timer delay
                         asyncio.create_task(send_current_message())
             
             message_input.on('keydown', handle_keydown)
             
-            # Add JavaScript to prevent Enter from adding newlines
-            ui.add_head_html(f'''
-                <script>
-                document.addEventListener('DOMContentLoaded', function() {{
-                    setTimeout(() => {{
-                        const textarea = document.getElementById('c{message_input.id}');
-                        if (textarea) {{
-                            textarea.addEventListener('keydown', function(e) {{
-                                if (e.key === 'Enter' && !e.shiftKey) {{
-                                    e.preventDefault();
-                                }}
-                            }});
+            # Add immediate JavaScript to prevent Enter from adding newlines (no delay)
+            ui.run_javascript(f'''
+                const textarea = document.getElementById('c{message_input.id}');
+                if (textarea) {{
+                    textarea.addEventListener('keydown', function(e) {{
+                        if (e.key === 'Enter' && !e.shiftKey) {{
+                            e.preventDefault();
                         }}
-                    }}, 100);
-                }});
-                </script>
+                    }});
+                }}
             ''')
             
             send_button = ui.button(icon='send', on_click=lambda: send_current_message()).props('round flat color=primary')
@@ -287,8 +313,9 @@ async def chat_page():
                 with ui.avatar(size='sm').classes('flex-shrink-0'):
                     ui.image(generate_user_avatar(user_email)).classes('rounded-full')
         
-        # Small delay to ensure DOM is updated, then scroll
+        # Immediate scroll + delayed scroll for DOM updates
         scroll_to_bottom()
+        ui.timer(0.05, scroll_to_bottom, once=True)  # Additional scroll after DOM update
 
         try:
             response_data = await message_router.process_user_message(
@@ -312,8 +339,9 @@ async def chat_page():
                     with ui.element('div').classes('bg-gray-200 p-3 rounded-lg max-w-[80%]'):
                         ui.markdown(assistant_response_content)
             
-            # Small delay to ensure DOM is updated, then scroll
+            # Immediate scroll + delayed scroll for DOM updates
             scroll_to_bottom()
+            ui.timer(0.05, scroll_to_bottom, once=True)  # Additional scroll after DOM update
 
             if response_data.get("error") and response_data.get("error_type") == "non_critical":
                 ui.notify(f"Nota: {response_data['error']}", type='warning', timeout=5000)
