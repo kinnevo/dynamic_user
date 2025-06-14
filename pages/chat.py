@@ -13,7 +13,7 @@ from typing import Optional # Added for type hinting
 # db_adapter = get_db()  # Use singleton instance
 
 @ui.page('/chat')
-@auth_required
+# @auth_required TODO: turn on when we have a way to handle auth
 async def chat_page():
     """Chat interface with sidebar for managing multiple chat sessions."""
     create_navigation_menu_2()
@@ -40,6 +40,27 @@ async def chat_page():
                 return ts 
         return ts.strftime("%Y-%m-%d %H:%M")
 
+    def generate_user_avatar(user_email):
+        """Generate a unique avatar URL based on user email."""
+        if not user_email:
+            # Fallback to a default avatar if no email
+            return 'https://robohash.org/default?bgset=bg2&size=64x64'
+        # Use robohash.org to generate consistent avatars based on email
+        return f'https://robohash.org/{user_email}?bgset=bg2&size=64x64'
+
+    def handle_key_event(e):
+        """Handle keyboard events for the message input."""
+        if e.args.get('key') == 'Enter':
+            if e.args.get('shiftKey'):
+                # Shift+Enter: Allow new line (default behavior)
+                return
+            else:
+                # Enter without Shift: Send message
+                if message_input and message_input.value.strip():
+                    asyncio.create_task(send_current_message())
+                # Prevent the default Enter behavior (new line)
+                e.args['preventDefault'] = True
+
     async def load_and_display_chat_history(chat_id: str):
         nonlocal messages_container, message_input, spinner # Ensure these are from chat_page scope
         
@@ -62,16 +83,29 @@ async def chat_page():
             
             if not history:
                 with messages_container:
-                    ui.markdown("Bienvenido! Describe tu idea y desarrollemosla juntos.").classes('self-start bg-gray-200 p-3 rounded-lg max-w-[80%]')
+                    # Welcome message with assistant avatar
+                    with ui.row().classes('justify-start items-end gap-2 w-full'):
+                        with ui.avatar(size='sm').classes('flex-shrink-0'):
+                            ui.image('https://robohash.org/assistant?bgset=bg1&size=32x32').classes('rounded-full')
+                        with ui.element('div').classes('bg-gray-200 p-3 rounded-lg max-w-[80%]'):
+                            ui.markdown("Bienvenido! Describe tu idea y desarrollemosla juntos.")
             else:
                 with messages_container:
                     for message in history:
                         if message['role'] == 'user':
-                            with ui.element('div').classes('self-end bg-blue-500 text-white p-3 rounded-lg max-w-[80%]'):
-                                ui.markdown(message['content'])
+                            # User message with avatar
+                            with ui.row().classes('justify-end items-end gap-2 w-full'):
+                                with ui.element('div').classes('bg-blue-500 text-white p-3 rounded-lg max-w-[80%]'):
+                                    ui.markdown(message['content'])
+                                with ui.avatar(size='sm').classes('flex-shrink-0'):
+                                    ui.image(generate_user_avatar(user_email)).classes('rounded-full')
                         else: # assistant
-                            with ui.element('div').classes('self-start bg-gray-200 p-3 rounded-lg max-w-[80%]'):
-                                ui.markdown(message['content'])
+                            # Assistant message with system avatar
+                            with ui.row().classes('justify-start items-end gap-2 w-full'):
+                                with ui.avatar(size='sm').classes('flex-shrink-0'):
+                                    ui.image('https://robohash.org/assistant?bgset=bg1&size=32x32').classes('rounded-full')
+                                with ui.element('div').classes('bg-gray-200 p-3 rounded-lg max-w-[80%]'):
+                                    ui.markdown(message['content'])
             await scroll_to_bottom()
             if message_input: message_input.enable()
         except Exception as e:
@@ -141,15 +175,24 @@ async def chat_page():
             messages_container = ui.column().classes(
                 'absolute inset-0 overflow-y-auto p-4 gap-2' 
             )
-            # Spinner is defined and placed here, centered over messages_container
-            spinner = ui.spinner(size='xl', color='primary').classes(
-                'absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2'
+            # Enhanced spinner with better positioning and size
+            spinner = ui.spinner('audio', size='xl', color='primary').classes(
+                'absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50'
             )
             if spinner: spinner.visible = False # Start hidden
         
-        # Input area (footer)
-        with ui.row().classes('w-full p-4 bg-gray-50 border-t items-center gap-2'):
-            message_input = ui.input(placeholder='Escribe tu mensaje...').classes('flex-grow').on('keydown.enter', lambda: send_current_message())
+        # Input area (footer) with user avatar
+        with ui.row().classes('w-full p-4 bg-gray-50 border-t items-center gap-3'):
+            # User Avatar
+            user_email = app.storage.user.get('user_email', '')
+            avatar_url = generate_user_avatar(user_email)
+            with ui.avatar(size='md').classes('flex-shrink-0'):
+                ui.image(avatar_url).classes('rounded-full')
+                
+            message_input = ui.textarea(placeholder='Escribe tu mensaje... (Shift+Enter para nueva línea)') \
+                .classes('flex-grow') \
+                .props('outlined dense rows=1 auto-grow') \
+                .on('keydown', handle_key_event)
             send_button = ui.button(icon='send', on_click=lambda: send_current_message()).props('round flat color=primary')
             
     # --- Chat Logic & Refreshable Components ---
@@ -204,7 +247,12 @@ async def chat_page():
         if messages_container:
             messages_container.clear()
             with messages_container:
-                 ui.markdown("Nuevo chat iniciado. Describe tu idea y desarrollemosla juntos.").classes('self-start bg-gray-200 p-3 rounded-lg max-w-[80%]')
+                 # New chat welcome message with assistant avatar
+                 with ui.row().classes('justify-start items-end gap-2 w-full'):
+                     with ui.avatar(size='sm').classes('flex-shrink-0'):
+                         ui.image('https://robohash.org/assistant?bgset=bg1&size=32x32').classes('rounded-full')
+                     with ui.element('div').classes('bg-gray-200 p-3 rounded-lg max-w-[80%]'):
+                         ui.markdown("Nuevo chat iniciado. Describe tu idea y desarrollemosla juntos.")
         if message_input:
             message_input.enable()
             message_input.value = ''
@@ -212,7 +260,7 @@ async def chat_page():
         await scroll_to_bottom()
 
     async def send_current_message():
-        nonlocal messages_container, message_input, spinner # These are accessed/modified
+        nonlocal messages_container, message_input, spinner, send_button # These are accessed/modified
         user_email = app.storage.user.get('user_email')
         active_chat_id = app.storage.user.get('active_chat_id')
         
@@ -228,16 +276,23 @@ async def chat_page():
             return
         
         message_input.value = '' # Clear input immediately
+        
+        # Disable send button and show spinner
+        if send_button: send_button.visible = False
+        if spinner: spinner.visible = True
 
         if not messages_container: return
         with messages_container:
-            with ui.element('div').classes('self-end bg-blue-500 text-white p-3 rounded-lg max-w-[80%]'):
-                ui.markdown(text)
+            # User message with avatar
+            with ui.row().classes('justify-end items-end gap-2 w-full'):
+                with ui.element('div').classes('bg-blue-500 text-white p-3 rounded-lg max-w-[80%]'):
+                    ui.markdown(text)
+                with ui.avatar(size='sm').classes('flex-shrink-0'):
+                    ui.image(generate_user_avatar(user_email)).classes('rounded-full')
         
         # Small delay to ensure DOM is updated, then scroll
         await scroll_to_bottom()
 
-        if spinner: spinner.visible = True
         try:
             response_data = await message_router.process_user_message(
                 message=text,
@@ -253,8 +308,12 @@ async def chat_page():
 
             # The assistant's message is saved by MessageRouter. Display it.
             with messages_container:
-                with ui.element('div').classes('self-start bg-gray-200 p-3 rounded-lg max-w-[80%]'):
-                    ui.markdown(assistant_response_content)
+                # Assistant message with system avatar
+                with ui.row().classes('justify-start items-end gap-2 w-full'):
+                    with ui.avatar(size='sm').classes('flex-shrink-0'):
+                        ui.image('https://robohash.org/assistant?bgset=bg1&size=32x32').classes('rounded-full')
+                    with ui.element('div').classes('bg-gray-200 p-3 rounded-lg max-w-[80%]'):
+                        ui.markdown(assistant_response_content)
             
             # Small delay to ensure DOM is updated, then scroll
             await scroll_to_bottom()
@@ -268,11 +327,16 @@ async def chat_page():
             print(f"Critical error calling message router: {e}")
             ui.notify(f"Error crítico del sistema: {e}", type='negative')
             with messages_container:
-                 with ui.element('div').classes('self-start bg-red-100 text-red-700 p-3 rounded-lg max-w-[80%] border-l-4 border-red-500'):
-                    ui.markdown(f"**⚠️ Error del Sistema**\n\nNo se pudo obtener respuesta: {e}")
+                 # Error message with system avatar
+                 with ui.row().classes('justify-start items-end gap-2 w-full'):
+                     with ui.avatar(size='sm').classes('flex-shrink-0'):
+                         ui.image('https://robohash.org/error?bgset=bg1&size=32x32').classes('rounded-full')
+                     with ui.element('div').classes('bg-red-100 text-red-700 p-3 rounded-lg max-w-[80%] border-l-4 border-red-500'):
+                        ui.markdown(f"**⚠️ Error del Sistema**\n\nNo se pudo obtener respuesta: {e}")
             await scroll_to_bottom()
         finally:
             if spinner: spinner.visible = False
+            if send_button: send_button.visible = True
 
         update_chat_list.refresh() # Refresh sidebar, timestamps might have updated
 
@@ -299,7 +363,12 @@ async def chat_page():
             if messages_container: messages_container.clear()
             if messages_container:
                 with messages_container:
-                    ui.markdown("Bienvenido! Inicia un nuevo chat para comenzar o selecciona uno anterior si existe.").classes('self-start bg-gray-200 p-3 rounded-lg max-w-[80%]')
+                    # Default welcome message with assistant avatar
+                    with ui.row().classes('justify-start items-end gap-2 w-full'):
+                        with ui.avatar(size='sm').classes('flex-shrink-0'):
+                            ui.image('https://robohash.org/assistant?bgset=bg1&size=32x32').classes('rounded-full')
+                        with ui.element('div').classes('bg-gray-200 p-3 rounded-lg max-w-[80%]'):
+                            ui.markdown("Bienvenido! Inicia un nuevo chat para comenzar o selecciona uno anterior si existe.")
             if message_input: message_input.disable()
 
     # Add asyncio import if not already present at the top
