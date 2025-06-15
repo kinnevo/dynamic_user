@@ -263,10 +263,8 @@ async def chat_page():
             if not active_chat_id:
                  await start_new_chat() # Or prompt user to start new chat
             return
-        
-        # Show spinner (keep send button visible)
-        if spinner: spinner.visible = True
 
+        # 1. IMMEDIATE: Render user message in UI (no waiting for DB)
         if not messages_column: return
         with messages_column:
             # User message with avatar
@@ -276,16 +274,21 @@ async def chat_page():
                 with ui.avatar(size='sm').classes('flex-shrink-0'):
                     ui.image(generate_user_avatar(user_email)).classes('rounded-full')
         
-        # Immediate scroll after user message - like reference script
+        # 2. IMMEDIATE: Scroll to show user message
         messages_container.scroll_to(percent=1e6)
+        
+        # 3. IMMEDIATE: Show spinner for AI processing
+        if spinner: spinner.visible = True
 
         try:
+            # 4. ASYNC: Process message (saves to DB + gets AI response)
             response_data = await message_router.process_user_message(
                 message=text,
                 user_email=user_email,
                 session_id=active_chat_id
             )
             
+            # 5. RENDER: Display AI response (user message already saved by MessageRouter)
             assistant_response_content = "Error: No se pudo obtener respuesta del asistente."
             if response_data.get("content"):
                 assistant_response_content = response_data.get("content")
@@ -301,7 +304,7 @@ async def chat_page():
                     with ui.element('div').classes('bg-gray-200 p-3 rounded-lg max-w-[80%]'):
                         ui.markdown(assistant_response_content)
             
-            # Immediate scroll after AI message - like reference script
+            # 6. SCROLL: Show AI response
             messages_container.scroll_to(percent=1e6)
 
             if response_data.get("error") and response_data.get("error_type") == "non_critical":
