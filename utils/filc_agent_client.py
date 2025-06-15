@@ -165,7 +165,9 @@ class FilcAgentClient:
                                         try:
                                             # Parse JSON chunk
                                             chunk_data = json.loads(data_part)
-                                            chunk_text = chunk_data.get('content', '')
+                                            # The API returns 'chunk' field, not 'content'
+                                            chunk_text = chunk_data.get('chunk', '')
+                                            is_finished = chunk_data.get('finished', False)
                                             
                                             if chunk_text:
                                                 full_response += chunk_text
@@ -174,8 +176,13 @@ class FilcAgentClient:
                                                     "content": chunk_text,
                                                     "full_content": full_response,
                                                     "success": True,
-                                                    "is_chunk": True
+                                                    "is_chunk": not is_finished,
+                                                    "is_final": is_finished
                                                 }
+                                            
+                                            # If finished, break the loop
+                                            if is_finished:
+                                                break
                                         except json.JSONDecodeError:
                                             # If not JSON, treat as plain text chunk
                                             if data_part:
@@ -190,14 +197,8 @@ class FilcAgentClient:
                                 except UnicodeDecodeError:
                                     continue
                         
-                        # Final response
-                        yield {
-                            "content": full_response,
-                            "full_content": full_response,
-                            "success": True,
-                            "is_chunk": False,
-                            "is_final": True
-                        }
+                        # Stream is complete - final chunk was already sent with finished=true
+                        pass
                         
                     else:
                         self.connection_status = "error"

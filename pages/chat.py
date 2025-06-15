@@ -394,7 +394,7 @@ async def chat_page():
                             ui.image('https://robohash.org/assistant?bgset=bg1&size=32x32').classes('rounded-full')
                         assistant_message_div = ui.element('div').classes('bg-gray-200 p-3 rounded-lg max-w-[80%]')
                         with assistant_message_div:
-                            assistant_markdown = ui.markdown("").classes('streaming-response')
+                            assistant_markdown = ui.markdown("⚡ Procesando respuesta...").classes('streaming-response typing-indicator')
                 
                 # Scroll to show initial AI response container
                 messages_container.scroll_to(percent=1e6)
@@ -412,6 +412,8 @@ async def chat_page():
                             chunk_content = chunk.get("full_content", "")
                             if assistant_markdown and chunk_content:
                                 assistant_markdown.content = chunk_content
+                                # Force UI update for smooth streaming
+                                await asyncio.sleep(0.01)
                                 # Scroll to bottom after each chunk
                                 messages_container.scroll_to(percent=1e6)
                         

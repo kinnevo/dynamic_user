@@ -232,6 +232,7 @@ class MessageRouter:
             
             # Stream response from FILC Agent
             full_response = ""
+            
             async for chunk in self.filc_client.process_message_stream(
                 message=message,
                 session_id=session_id,
