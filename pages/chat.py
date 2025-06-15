@@ -31,17 +31,6 @@ async def chat_page():
         50% { opacity: 0.5; }
         100% { opacity: 1; }
     }
-    .typing-indicator::after {
-        content: '●●●';
-        animation: typing 1.5s infinite;
-        color: #9CA3AF;
-    }
-    @keyframes typing {
-        0%, 20% { opacity: 0; }
-        40% { opacity: 1; }
-        60% { opacity: 1; }
-        80%, 100% { opacity: 0; }
-    }
     </style>
     ''')
     
@@ -53,7 +42,6 @@ async def chat_page():
     # --- UI Element Variables (defined early for access in helpers) ---
     messages_container: Optional[ui.column] = None
     message_input: Optional[ui.input] = None
-    spinner: Optional[ui.spinner] = None
     chat_list_ui: Optional[ui.column] = None
 
     # --- Helper Functions ---
@@ -79,7 +67,7 @@ async def chat_page():
 
 
     async def load_and_display_chat_history(chat_id: str):
-        nonlocal messages_container, messages_column, message_input, spinner # Ensure these are from chat_page scope
+        nonlocal messages_container, messages_column, message_input # Ensure these are from chat_page scope
         
         if not messages_column: return
         messages_column.clear()
@@ -93,7 +81,6 @@ async def chat_page():
         app.storage.user['active_chat_id'] = chat_id
         print(f"Loading history for active_chat_id: {chat_id}")
         
-        if spinner: spinner.visible = True
         try:
             history = await db_adapter.get_recent_messages(session_id=chat_id, limit=100)
             if not messages_column: return 
@@ -132,8 +119,6 @@ async def chat_page():
             if messages_column:
                 with messages_column:
                     ui.label(f"Error al cargar el chat {chat_id}.").classes('text-negative')
-        finally:
-            if spinner: spinner.visible = False
         refresh_task = update_chat_list.refresh()
         if refresh_task is not None:
             await refresh_task
@@ -223,12 +208,6 @@ async def chat_page():
         with messages_container:
             # Container for messages inside the scroll area
             messages_column = ui.column().classes('gap-2 w-full')
-        
-        # Enhanced spinner positioned over the scroll area
-        spinner = ui.spinner('audio', size='xl', color='primary').classes(
-            'fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50'
-        )
-        if spinner: spinner.visible = False # Start hidden
         
         # Input area (footer) with user avatar
         with ui.row().classes('w-full p-4 bg-gray-50 border-t items-center gap-3'):
@@ -342,7 +321,7 @@ async def chat_page():
 
     async def send_message_with_text(text: str):
         """Send a message with pre-captured text (for immediate UI response)."""
-        nonlocal messages_container, messages_column, message_input, spinner, send_button # These are accessed/modified
+        nonlocal messages_container, messages_column, message_input, send_button # These are accessed/modified
         user_email = app.storage.user.get('user_email')
         active_chat_id = app.storage.user.get('active_chat_id')
         
@@ -365,15 +344,12 @@ async def chat_page():
         # 2. IMMEDIATE: Scroll to show user message
         messages_container.scroll_to(percent=1e6)
         
-        # 3. IMMEDIATE: Show spinner for AI processing
-        if spinner: spinner.visible = True
-
-        # 4. ASYNC: Start AI processing first, then DB operations
+        # 3. ASYNC: Start AI processing first, then DB operations
         asyncio.create_task(process_ai_then_save_to_db(text, user_email, active_chat_id))
 
     async def process_ai_then_save_to_db(text: str, user_email: str, active_chat_id: str):
         """Handle AI processing first, then DB operations asynchronously."""
-        nonlocal messages_container, messages_column, spinner
+        nonlocal messages_container, messages_column
         
         try:
             # Step 1: Get AI response directly (no DB operations yet)
@@ -394,7 +370,7 @@ async def chat_page():
                             ui.image('https://robohash.org/assistant?bgset=bg1&size=32x32').classes('rounded-full')
                         assistant_message_div = ui.element('div').classes('bg-gray-200 p-3 rounded-lg max-w-[80%]')
                         with assistant_message_div:
-                            assistant_markdown = ui.markdown("⚡ Procesando respuesta...").classes('streaming-response typing-indicator')
+                            assistant_markdown = ui.markdown("🤖 **Generando respuesta...**").classes('streaming-response')
                 
                 # Scroll to show initial AI response container
                 messages_container.scroll_to(percent=1e6)
@@ -411,11 +387,7 @@ async def chat_page():
                             # Update the markdown content with streaming text
                             chunk_content = chunk.get("full_content", "")
                             if assistant_markdown and chunk_content:
-                                # Remove typing indicator on first chunk
-                                try:
-                                    assistant_markdown.classes('streaming-response')  # Reset to just streaming-response
-                                except:
-                                    pass  # If classes method fails, continue anyway
+                                # Simply update content - don't try to modify classes
                                 assistant_markdown.content = chunk_content
                                 # Force UI update for smooth streaming
                                 await asyncio.sleep(0.01)
@@ -427,11 +399,7 @@ async def chat_page():
                             final_content = chunk.get("content", "")
                             if assistant_markdown and final_content:
                                 assistant_markdown.content = final_content
-                                # Remove typing indicator class
-                                try:
-                                    assistant_markdown.classes('streaming-response')  # Reset to clean classes
-                                except:
-                                    pass  # If classes method fails, continue anyway
+                                # Don't try to modify classes - just update content
                                 full_response = final_content
                             messages_container.scroll_to(percent=1e6)
                             break
@@ -467,7 +435,6 @@ async def chat_page():
                 # Scroll after error message
                 messages_container.scroll_to(percent=1e6)
         finally:
-            if spinner: spinner.visible = False
             # Refresh sidebar after everything is done
             refresh_task = update_chat_list.refresh()
             if refresh_task is not None:

@@ -169,8 +169,11 @@ class FilcAgentClient:
                                             chunk_text = chunk_data.get('chunk', '')
                                             is_finished = chunk_data.get('finished', False)
                                             
-                                            if chunk_text:
-                                                full_response += chunk_text
+                                            # Always yield chunks, even if content is empty (for final chunk)
+                                            if chunk_text or is_finished:
+                                                if chunk_text:
+                                                    full_response += chunk_text
+                                                
                                                 # Yield each chunk for real-time streaming
                                                 yield {
                                                     "content": chunk_text,
