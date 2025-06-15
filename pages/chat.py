@@ -13,8 +13,37 @@ from typing import Optional
 @ui.page('/chat')
 # @auth_required TODO: turn on when we have a way to handle auth
 async def chat_page():
-    """Chat interface with sidebar for managing multiple chat sessions and FILC Agent integration."""
+    """Chat interface with sidebar for managing multiple chat sessions and FILC Agent streaming integration."""
     create_navigation_menu_2()
+    
+    # Add custom CSS for streaming animations
+    ui.add_head_html('''
+    <style>
+    .streaming-response {
+        animation: none !important;
+    }
+    .streaming-indicator {
+        display: inline-block;
+        animation: pulse 1.5s ease-in-out infinite;
+    }
+    @keyframes pulse {
+        0% { opacity: 1; }
+        50% { opacity: 0.5; }
+        100% { opacity: 1; }
+    }
+    .typing-indicator::after {
+        content: '●●●';
+        animation: typing 1.5s infinite;
+        color: #9CA3AF;
+    }
+    @keyframes typing {
+        0%, 20% { opacity: 0; }
+        40% { opacity: 1; }
+        60% { opacity: 1; }
+        80%, 100% { opacity: 0; }
+    }
+    </style>
+    ''')
     
     # Initialize components inside function to avoid module-level database calls
     message_router = MessageRouter()
@@ -126,6 +155,7 @@ async def chat_page():
         # Left side with title
         with ui.row().classes('items-center gap-2'):
             ui.label('Chat with FILC Agent').classes('text-h5 font-semibold')
+            ui.badge('Streaming Optimized', color='green').classes('text-xs')
         
         # Right side with status indicator and check button
         with ui.row().classes('items-center gap-2'):
@@ -350,39 +380,66 @@ async def chat_page():
             # Get conversation history for context
             history = await db_adapter.get_conversation_history(active_chat_id)
             
-            # Call AI directly for fastest response
-            ai_response = await message_router.filc_client.process_message(
-                message=text,
-                session_id=active_chat_id,
-                history=history
-            )
+            # Stream AI response for real-time updates
+            assistant_message_div = None
+            assistant_markdown = None
+            full_response = ""
             
-            # Extract response content
-            response_content = message_router._extract_response_text(ai_response)
-            
-            # Step 2: IMMEDIATELY render AI response (before saving to DB)
-            assistant_response_content = response_content if response_content else "Error: No se pudo obtener respuesta del asistente."
-
+            # Step 2: Create assistant message container immediately
             if messages_column:
                 with messages_column:
                     # Assistant message with system avatar
                     with ui.row().classes('justify-start items-end gap-2 w-full'):
                         with ui.avatar(size='sm').classes('flex-shrink-0'):
                             ui.image('https://robohash.org/assistant?bgset=bg1&size=32x32').classes('rounded-full')
-                        with ui.element('div').classes('bg-gray-200 p-3 rounded-lg max-w-[80%]'):
-                            ui.markdown(assistant_response_content)
+                        assistant_message_div = ui.element('div').classes('bg-gray-200 p-3 rounded-lg max-w-[80%]')
+                        with assistant_message_div:
+                            assistant_markdown = ui.markdown("").classes('streaming-response')
                 
-                # Scroll to show AI response immediately
+                # Scroll to show initial AI response container
                 messages_container.scroll_to(percent=1e6)
-
-            # Step 3: Save to database in background (non-blocking)
-            asyncio.create_task(save_messages_to_db(text, response_content, user_email, active_chat_id))
-
-            # Handle AI errors (log only, no UI notifications from background task)
-            if "error" in ai_response and response_content and not str(response_content).startswith("Error:"):
-                print(f"⚠️ AI Warning: {ai_response.get('error')}")
-            elif "error" in ai_response and not response_content:
-                print(f"❌ AI Error: {ai_response.get('error')}")
+            
+            # Step 3: Stream response chunks
+            try:
+                async for chunk in message_router.process_user_message_stream(
+                    message=text,
+                    user_email=user_email,
+                    session_id=active_chat_id
+                ):
+                    if chunk.get("success"):
+                        if chunk.get("is_chunk", False):
+                            # Update the markdown content with streaming text
+                            chunk_content = chunk.get("full_content", "")
+                            if assistant_markdown and chunk_content:
+                                assistant_markdown.content = chunk_content
+                                # Scroll to bottom after each chunk
+                                messages_container.scroll_to(percent=1e6)
+                        
+                        elif chunk.get("is_final", False):
+                            # Final update
+                            final_content = chunk.get("content", "")
+                            if assistant_markdown and final_content:
+                                assistant_markdown.content = final_content
+                                full_response = final_content
+                            messages_container.scroll_to(percent=1e6)
+                            break
+                    else:
+                        # Handle streaming error
+                        error_content = f"**⚠️ Error del Sistema**\n\n{chunk.get('error', 'Error desconocido')}"
+                        if assistant_markdown:
+                            assistant_markdown.content = error_content
+                            assistant_message_div.classes('bg-red-100 text-red-700 border-l-4 border-red-500')
+                        messages_container.scroll_to(percent=1e6)
+                        break
+                        
+            except Exception as stream_error:
+                print(f"❌ Streaming error: {stream_error}")
+                # Handle streaming failure
+                error_content = f"**⚠️ Error de Conexión**\n\nNo se pudo establecer conexión de streaming: {stream_error}"
+                if assistant_markdown:
+                    assistant_markdown.content = error_content
+                    assistant_message_div.classes('bg-red-100 text-red-700 border-l-4 border-red-500')
+                messages_container.scroll_to(percent=1e6)
 
         except Exception as e:
             print(f"❌ Critical error in AI processing: {e}")
@@ -404,42 +461,7 @@ async def chat_page():
             if refresh_task is not None:
                 await refresh_task
 
-    async def save_messages_to_db(user_message: str, ai_response: str, user_email: str, active_chat_id: str):
-        """Save both user and AI messages to database in background."""
-        try:
-            # Get Firebase user data
-            current_user = FirebaseAuth.get_current_user()
-            firebase_uid = current_user.get('uid') if current_user else None
-            display_name = current_user.get('displayName') if current_user else None
-            
-            # Save user message
-            user_message_id = await db_adapter.save_message(
-                user_email=user_email,
-                session_id=active_chat_id,
-                content=user_message,
-                role="user",
-                firebase_uid=firebase_uid,
-                display_name=display_name
-            )
-            
-            # Save AI response if we got one
-            if ai_response and not ai_response.startswith("Error:"):
-                assistant_message_id = await db_adapter.save_message(
-                    user_email=user_email,
-                    session_id=active_chat_id,
-                    content=ai_response,
-                    role="assistant",
-                    firebase_uid=firebase_uid,
-                    display_name=display_name,
-                    model_used="FILC Agent"
-                )
-            
-            print(f"✅ Messages saved to DB for session {active_chat_id}")
-            
-        except Exception as e:
-            print(f"❌ Error saving messages to DB: {e}")
-            # Don't show UI error for background DB operations
-            # The user already sees their messages, DB is just for persistence
+
 
     async def send_current_message():
         """Send message from input field (for send button)."""

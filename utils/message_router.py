@@ -180,6 +180,139 @@ class MessageRouter:
                 print(f"MessageRouter: Additional error updating user status: {db_error}")
             return {"error": f"An unexpected error occurred: {str(e)}"}
     
+    async def process_user_message_stream(self, 
+                                        message: str, 
+                                        user_email: str, 
+                                        session_id: str):
+        """
+        Process a user message with streaming response from FILC Agent.
+        
+        Args:
+            message: User message text.
+            user_email: Email of the user.
+            session_id: Unique identifier for this specific chat session.
+            
+        Yields:
+            Streaming response chunks with content and metadata.
+        """
+        try:
+            print(f"MessageRouter Stream: Processing message from {user_email} for chat {session_id}: '{message[:50]}...'" )
+            
+            # Get async database adapter
+            db_adapter = await self._get_db_adapter()
+            
+            # Get current user Firebase data
+            current_user = FirebaseAuth.get_current_user()
+            firebase_uid = current_user.get('uid') if current_user else None
+            display_name = current_user.get('displayName') if current_user else None
+            
+            # Save user message first
+            user_message_id = await db_adapter.save_message(
+                user_email=user_email,
+                session_id=session_id,
+                content=message,
+                role="user",
+                firebase_uid=firebase_uid,
+                display_name=display_name
+            )
+            
+            if not user_message_id:
+                yield {"error": "Failed to save user message.", "is_final": True}
+                return
+            
+            # Get conversation history
+            history = await db_adapter.get_conversation_history(session_id)
+            
+            # Update user status to active
+            await db_adapter.update_user_status(
+                identifier=user_email, 
+                status="Active", 
+                is_email=True
+            )
+            
+            # Stream response from FILC Agent
+            full_response = ""
+            async for chunk in self.filc_client.process_message_stream(
+                message=message,
+                session_id=session_id,
+                history=history
+            ):
+                if chunk.get("success"):
+                    if chunk.get("is_chunk", False):
+                        # Stream chunk to frontend
+                        yield {
+                            "content": chunk.get("content", ""),
+                            "full_content": chunk.get("full_content", ""),
+                            "is_chunk": True,
+                            "success": True
+                        }
+                        full_response = chunk.get("full_content", "")
+                    
+                    elif chunk.get("is_final", False):
+                        # Final chunk - save to database
+                        full_response = chunk.get("content", "")
+                        
+                        # Save assistant response
+                        if full_response:
+                            await db_adapter.save_message(
+                                user_email=user_email,
+                                session_id=session_id,
+                                content=full_response,
+                                role="assistant",
+                                firebase_uid=firebase_uid,
+                                display_name=display_name,
+                                model_used="FILC Agent Optimized"
+                            )
+                        
+                        # Update user status
+                        await db_adapter.update_user_status(
+                            identifier=user_email, 
+                            status="CompletedInteraction", 
+                            is_email=True
+                        )
+                        
+                        # Send final chunk
+                        yield {
+                            "content": full_response,
+                            "full_content": full_response,
+                            "is_final": True,
+                            "success": True
+                        }
+                        break
+                else:
+                    # Error chunk
+                    error_msg = chunk.get("error", "Unknown error")
+                    
+                    # Update user status to failed
+                    await db_adapter.update_user_status(
+                        identifier=user_email, 
+                        status="FailedInteraction", 
+                        is_email=True
+                    )
+                    
+                    yield {
+                        "error": error_msg,
+                        "is_final": True,
+                        "success": False
+                    }
+                    break
+                    
+        except Exception as e:
+            print(f"MessageRouter Stream: CRITICAL ERROR for {user_email}, chat {session_id}: {e}")
+            
+            # Update user status to failed
+            try:
+                db_adapter = await self._get_db_adapter()
+                await db_adapter.update_user_status(identifier=user_email, status="FailedInteraction", is_email=True)
+            except Exception as db_error:
+                print(f"MessageRouter Stream: Additional error updating user status: {db_error}")
+            
+            yield {
+                "error": f"An unexpected error occurred: {str(e)}",
+                "is_final": True,
+                "success": False
+            }
+    
     def _extract_response_text(self, response: Dict[str, Any]) -> Optional[str]:
         """
         Extract text from FILC Agent API response.
