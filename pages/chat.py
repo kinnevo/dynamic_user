@@ -66,7 +66,7 @@ async def chat_page():
         
         if spinner: spinner.visible = True
         try:
-            history = await asyncio.to_thread(db_adapter.get_recent_messages, session_id=chat_id, limit=100)
+            history = await db_adapter.get_recent_messages(session_id=chat_id, limit=100)
             if not messages_column: return 
             
             if not history:
@@ -105,7 +105,9 @@ async def chat_page():
                     ui.label(f"Error al cargar el chat {chat_id}.").classes('text-negative')
         finally:
             if spinner: spinner.visible = False
-        update_chat_list.refresh() # Remove await - refresh() is not async
+        refresh_task = update_chat_list.refresh()
+        if refresh_task is not None:
+            await refresh_task
 
     def scroll_to_bottom():
         """Direct scroll using NiceGUI scroll_area method - like reference script."""
@@ -243,7 +245,7 @@ async def chat_page():
             
     # --- Chat Logic & Refreshable Components ---
     @ui.refreshable
-    def update_chat_list():
+    async def update_chat_list():
         nonlocal chat_list_ui # chat_list_ui is modified here
         if not chat_list_ui: return
 
@@ -254,7 +256,7 @@ async def chat_page():
                 ui.label("Error: Usuario no identificado.")
             return
 
-        chat_sessions = db_adapter.get_chat_sessions_for_user(user_email)
+        chat_sessions = await db_adapter.get_chat_sessions_for_user(user_email)
         if not chat_sessions:
             with chat_list_ui:
                 ui.label("No hay chats aún.").classes('text-gray-500 p-2')
@@ -302,7 +304,9 @@ async def chat_page():
         if message_input:
             message_input.enable()
             message_input.value = ''
-        update_chat_list.refresh() 
+        refresh_task = update_chat_list.refresh()
+        if refresh_task is not None:
+            await refresh_task
         # Direct scroll like reference script
         messages_container.scroll_to(percent=1e6)
 
@@ -344,7 +348,7 @@ async def chat_page():
         try:
             # Step 1: Get AI response directly (no DB operations yet)
             # Get conversation history for context
-            history = db_adapter.get_conversation_history(active_chat_id)
+            history = await db_adapter.get_conversation_history(active_chat_id)
             
             # Call AI directly for fastest response
             ai_response = await message_router.filc_client.process_message(
@@ -396,7 +400,9 @@ async def chat_page():
         finally:
             if spinner: spinner.visible = False
             # Refresh sidebar after everything is done
-            update_chat_list.refresh()
+            refresh_task = update_chat_list.refresh()
+            if refresh_task is not None:
+                await refresh_task
 
     async def save_messages_to_db(user_message: str, ai_response: str, user_email: str, active_chat_id: str):
         """Save both user and AI messages to database in background."""
@@ -407,7 +413,7 @@ async def chat_page():
             display_name = current_user.get('displayName') if current_user else None
             
             # Save user message
-            user_message_id = db_adapter.save_message(
+            user_message_id = await db_adapter.save_message(
                 user_email=user_email,
                 session_id=active_chat_id,
                 content=user_message,
@@ -418,7 +424,7 @@ async def chat_page():
             
             # Save AI response if we got one
             if ai_response and not ai_response.startswith("Error:"):
-                assistant_message_id = db_adapter.save_message(
+                assistant_message_id = await db_adapter.save_message(
                     user_email=user_email,
                     session_id=active_chat_id,
                     content=ai_response,
