@@ -3,37 +3,38 @@ Singleton Database Manager for FastInnovation
 Ensures only one database adapter instance is created and shared across the application.
 """
 
-from utils.unified_database import UnifiedDatabaseAdapter
+import asyncio
+from utils.async_database import AsyncDatabaseAdapter
 from typing import Optional
 
 class DatabaseManager:
-    """Singleton manager for database adapter instance."""
+    """Singleton manager for async database adapter instance."""
     
-    _instance: Optional[UnifiedDatabaseAdapter] = None
+    _instance: Optional[AsyncDatabaseAdapter] = None
     _initialized: bool = False
     
     @classmethod
-    def get_instance(cls) -> UnifiedDatabaseAdapter:
-        """Get the singleton database adapter instance."""
+    async def get_instance(cls) -> AsyncDatabaseAdapter:
+        """Get the singleton async database adapter instance."""
         if cls._instance is None:
-            print("🔄 Creating shared database adapter instance...")
-            cls._instance = UnifiedDatabaseAdapter()
+            print("🔄 Creating shared async database adapter instance...")
+            cls._instance = AsyncDatabaseAdapter()
+            await cls._instance.init_pool()
             cls._initialized = True
-            print("✅ Shared database adapter instance created successfully")
+            print("✅ Shared async database adapter instance created successfully")
         return cls._instance
     
     @classmethod
-    def reset_instance(cls) -> None:
+    async def reset_instance(cls) -> None:
         """Reset the singleton instance (for testing purposes)."""
         if cls._instance:
             # Clean up existing connection pool
-            if hasattr(cls._instance, 'connection_pool'):
-                cls._instance.connection_pool.closeall()
+            await cls._instance.close()
             cls._instance = None
             cls._initialized = False
-            print("🔄 Database adapter instance reset")
+            print("🔄 Async database adapter instance reset")
 
 # Convenience function for easy import
-def get_db() -> UnifiedDatabaseAdapter:
-    """Get the shared database adapter instance."""
-    return DatabaseManager.get_instance() 
+async def get_db() -> AsyncDatabaseAdapter:
+    """Get the shared async database adapter instance."""
+    return await DatabaseManager.get_instance() 

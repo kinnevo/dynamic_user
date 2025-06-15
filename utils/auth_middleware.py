@@ -91,8 +91,8 @@ def auth_required(func):
             return
         
         # Ensure user exists in database using singleton instance
-        db_adapter = get_db()
-        user_id = db_adapter.get_or_create_user_by_email(
+        db_adapter = await get_db()
+        user_id = await db_adapter.get_or_create_user_by_email(
             email=current_user_email,
             firebase_uid=firebase_uid,
             display_name=firebase_user_data.get('displayName', current_user_email.split('@')[0])
@@ -100,6 +100,8 @@ def auth_required(func):
         
         if user_id:
             print(f"Auth middleware: User {current_user_email} ensured in database with Firebase UID {firebase_uid}")
+        else:
+            print(f"Failed to ensure user {current_user_email} in database")
         
         print(f"Auth middleware: Authentication successful for {current_user_email}, proceeding to protected page.")
         

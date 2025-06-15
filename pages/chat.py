@@ -7,21 +7,18 @@ from utils.auth_middleware import auth_required
 from utils.firebase_auth import FirebaseAuth
 from datetime import datetime
 import asyncio
-from typing import Optional # Added for type hinting
-
-# Initialize components - moved inside function to avoid module-level database initialization
-# message_router = MessageRouter()
-# db_adapter = get_db()  # Use singleton instance
+from typing import Optional
 
 @ui.page('/chat')
 # @auth_required TODO: turn on when we have a way to handle auth
 async def chat_page():
-    """Chat interface with sidebar for managing multiple chat sessions."""
+    """Chat interface with sidebar for managing multiple chat sessions and FILC Agent integration."""
     create_navigation_menu_2()
     
     # Initialize components inside function to avoid module-level database calls
     message_router = MessageRouter()
-    db_adapter = get_db()  # Use singleton instance
+    db_adapter = await get_db()  # Use singleton instance with await
+    filc_client = FilcAgentClient()
     
     # --- UI Element Variables (defined early for access in helpers) ---
     messages_container: Optional[ui.column] = None
@@ -107,7 +104,7 @@ async def chat_page():
                     ui.label(f"Error al cargar el chat {chat_id}.").classes('text-negative')
         finally:
             if spinner: spinner.visible = False
-        update_chat_list.refresh() # update_chat_list is a refreshable function in scope
+        update_chat_list.refresh() # Remove await - refresh() is not async
 
     def scroll_to_bottom():
         """Direct scroll using NiceGUI scroll_area method - like reference script."""
@@ -121,6 +118,61 @@ async def chat_page():
                 pass
 
     # --- Main UI Structure ---
+    # Header with status indicator
+    with ui.header().classes('items-center justify-between bg-white shadow-sm'):
+        # Left side with title
+        with ui.row().classes('items-center gap-2'):
+            ui.label('Chat with FILC Agent').classes('text-h5 font-semibold')
+        
+        # Right side with status indicator and check button
+        with ui.row().classes('items-center gap-2'):
+            # Create the status indicator as refreshable component
+            @ui.refreshable
+            def update_status_indicator():
+                # Use the connection status from filc_client
+                connection_status = filc_client.connection_status if hasattr(filc_client, 'connection_status') else 'unknown'
+                
+                status_color = {
+                    'connected': 'green',
+                    'timeout': 'red',
+                    'unreachable': 'red',
+                    'error': 'red',
+                    'unknown': 'yellow'
+                }.get(connection_status, 'yellow')
+                
+                status_text = {
+                    'connected': 'Connected to FILC Agent',
+                    'timeout': 'Connection Timeout - Server not responding',
+                    'unreachable': 'Server Unreachable - Check network or server status',
+                    'error': 'Connection Error - See logs for details',
+                    'unknown': 'Status Unknown - Click "Check Connection"'
+                }.get(connection_status, 'Unknown Status')
+                
+                with ui.tooltip(status_text):
+                    ui.icon('circle', color=status_color).classes('text-sm')
+            
+            # Display the status indicator
+            status_indicator = update_status_indicator()
+            
+            # Function to check connection and update indicator
+            async def check_and_update_connection():
+                ui.notify('Checking FILC Agent connection...', timeout=2000)
+                is_connected, message = await filc_client.check_connection()
+                # Store the connection status for the indicator
+                filc_client.connection_status = 'connected' if is_connected else 'error'
+                
+                refresh_task = status_indicator.refresh()
+                if refresh_task is not None:
+                    await refresh_task
+                
+                if is_connected:
+                    ui.notify('Connected to FILC Agent API', type='positive')
+                else:
+                    ui.notify(f'Connection issue: {message}', type='negative', timeout=8000)
+            
+            # Add a button to check connection
+            ui.button('Check Connection', on_click=check_and_update_connection).classes('text-xs bg-blue-100')
+
     # Sidebar for chat sessions
     with ui.left_drawer(value=True, bordered=True).classes('bg-gray-100 p-0') as sidebar:
         with ui.column().classes('w-full p-4 gap-2'):
@@ -398,19 +450,19 @@ async def chat_page():
         ui.label("Error: Usuario no autenticado.").classes('text-center m-auto text-negative')
         return
 
-    update_chat_list() 
+    await update_chat_list() 
 
     active_chat_id_on_load = app.storage.user.get('active_chat_id')
     if active_chat_id_on_load:
         # Must await async functions called directly
         await load_and_display_chat_history(active_chat_id_on_load)
     else:
-        chat_sessions = db_adapter.get_chat_sessions_for_user(user_email)
+        chat_sessions = await db_adapter.get_chat_sessions_for_user(user_email)
         if chat_sessions:
             most_recent_chat_id = chat_sessions[0]['session_id']
             app.storage.user['active_chat_id'] = most_recent_chat_id
             await load_and_display_chat_history(most_recent_chat_id)
-            # update_chat_list.refresh() # load_and_display_chat_history already calls this
+            # load_and_display_chat_history already calls update_chat_list.refresh()
         else:
             if messages_column: messages_column.clear()
             if messages_column:
@@ -422,10 +474,3 @@ async def chat_page():
                         with ui.element('div').classes('bg-gray-200 p-3 rounded-lg max-w-[80%]'):
                             ui.markdown("Bienvenido! Inicia un nuevo chat para comenzar o selecciona uno anterior si existe.")
             if message_input: message_input.disable()
-
-    # Add asyncio import if not already present at the top
-    # import asyncio # Already present
-
-# Note: The FilcAgentClient and MessageRouter integrations are placeholders
-# and would need to be fully integrated into the send_current_message logic.
-# Error handling, loading spinners, and more sophisticated UI updates can be added. 

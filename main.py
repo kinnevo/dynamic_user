@@ -10,6 +10,7 @@ from pages.reportes import reportes_page
 from pages.admin import page_admin
 from pages.chat import chat_page
 from pages.home import home
+# from pages.profile import profile_page
 from pages.login import login_page
 from pages.register import register_page
 from pages.reset_password import reset_password_page
@@ -24,18 +25,21 @@ if os.path.exists('.env'):
 # message_router = MessageRouter()
 
 @app.on_startup
-def on_startup():
+async def on_startup():
     """Application startup handler"""
     print("Starting up...")
     # Initialize database connection using singleton
-    db_adapter = get_db()
-    db_adapter._init_db()
+    db_adapter = await get_db()
+    print("Database adapter initialized successfully")
 
 
 @app.on_shutdown
-def on_shutdown():
+async def on_shutdown():
     """Application shutdown handler"""
     print("Shutting down...")
+    # Close database connections properly
+    from utils.database_singleton import DatabaseManager
+    await DatabaseManager.reset_instance()
 
 # Redirect root to authentication check
 @ui.page('/')
@@ -53,10 +57,19 @@ def index():
         # User is not logged in, redirect to login page
         return ui.navigate.to('/login')
 
+# Health endpoint for Cloud Run
+@ui.page('/health')
+def health():
+    """Health check endpoint for Cloud Run"""
+    with ui.element('div').style('text-align: center; padding: 20px;'):
+        ui.label('Service is healthy').style('color: green; font-size: 18px;')
+        ui.label(f'Environment: {os.environ.get("ENVIRONMENT", "development")}')
+        ui.label(f'Cloud SQL: {"Enabled" if os.environ.get("USE_CLOUD_SQL") == "true" else "Disabled"}')
+
 # Get port from environment variable (Cloud Run sets PORT)
 port = int(os.environ.get('PORT', 8080))
 
 # Get secret key from environment variable or use a default for development
 secret_key = os.environ.get('STORAGE_SECRET', 'development_secret_key_1234567890')
 
-ui.run(title='FastInnovation 1.2', port=port, favicon='static/favicon.png', storage_secret=secret_key) 
+ui.run(title='FastInnovation 1.2', port=port, host='0.0.0.0', favicon='static/favicon.png', storage_secret=secret_key) 
