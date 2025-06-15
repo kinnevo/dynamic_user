@@ -4,6 +4,7 @@ from utils.message_router import MessageRouter
 from utils.layouts import create_navigation_menu_2
 from utils.database_singleton import get_db
 from utils.auth_middleware import auth_required
+from utils.firebase_auth import FirebaseAuth
 from datetime import datetime
 import asyncio
 from typing import Optional # Added for type hinting
@@ -320,15 +321,15 @@ async def chat_page():
             # Step 3: Save to database in background (non-blocking)
             asyncio.create_task(save_messages_to_db(text, response_content, user_email, active_chat_id))
 
-            # Handle AI errors
+            # Handle AI errors (log only, no UI notifications from background task)
             if "error" in ai_response and response_content and not str(response_content).startswith("Error:"):
-                ui.notify(f"Nota: {ai_response.get('error')}", type='warning', timeout=5000)
+                print(f"⚠️ AI Warning: {ai_response.get('error')}")
             elif "error" in ai_response and not response_content:
-                 ui.notify(f"Error procesando el mensaje: {ai_response.get('error')}", type='negative', timeout=5000)
+                print(f"❌ AI Error: {ai_response.get('error')}")
 
         except Exception as e:
-            print(f"Critical error in AI processing: {e}")
-            ui.notify(f"Error crítico del sistema: {e}", type='negative')
+            print(f"❌ Critical error in AI processing: {e}")
+            # Can't use ui.notify from background task, so render error message directly
             if messages_column:
                 with messages_column:
                      # Error message with system avatar

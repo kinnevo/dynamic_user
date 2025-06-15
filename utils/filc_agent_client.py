@@ -6,12 +6,19 @@ from typing import Dict, List, Any, Optional, Tuple
 class FilcAgentClient:
     """Client for interacting with the FILC Agent API"""
     
-    def __init__(self, base_url: str = "https://filc-production.up.railway.app"):
-        self.base_url = base_url
+    def __init__(self, base_url: str = None):
+        import os
+        self.base_url = base_url or os.getenv('FILC_API_URL_PRODUCTION')
+        if not self.base_url:
+            raise ValueError("FILC_API_URL_PRODUCTION environment variable is required")
         self.chat_endpoint = "/api/v1/agent/chat"
+        api_key = os.getenv('FILC_API_KEY')
+        if not api_key:
+            raise ValueError("FILC_API_KEY environment variable is required")
         self.headers = {
             'accept': 'application/json',
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'X-API-Key': api_key
         }
         self.connection_status = "unknown"  # Added for UI compatibility
         
