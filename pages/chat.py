@@ -264,7 +264,7 @@ async def chat_page():
                  await start_new_chat() # Or prompt user to start new chat
             return
 
-        # 1. IMMEDIATE: Render user message in UI (no waiting for DB)
+        # 1. IMMEDIATE: Render user message in UI (no waiting for anything)
         if not messages_column: return
         with messages_column:
             # User message with avatar
@@ -280,54 +280,106 @@ async def chat_page():
         # 3. IMMEDIATE: Show spinner for AI processing
         if spinner: spinner.visible = True
 
+        # 4. ASYNC: Start AI processing first, then DB operations
+        asyncio.create_task(process_ai_then_save_to_db(text, user_email, active_chat_id))
+
+    async def process_ai_then_save_to_db(text: str, user_email: str, active_chat_id: str):
+        """Handle AI processing first, then DB operations asynchronously."""
+        nonlocal messages_container, messages_column, spinner
+        
         try:
-            # 4. ASYNC: Process message (saves to DB + gets AI response)
-            response_data = await message_router.process_user_message(
+            # Step 1: Get AI response directly (no DB operations yet)
+            # Get conversation history for context
+            history = db_adapter.get_conversation_history(active_chat_id)
+            
+            # Call AI directly for fastest response
+            ai_response = await message_router.filc_client.process_message(
                 message=text,
-                user_email=user_email,
-                session_id=active_chat_id
+                session_id=active_chat_id,
+                history=history
             )
             
-            # 5. RENDER: Display AI response (user message already saved by MessageRouter)
-            assistant_response_content = "Error: No se pudo obtener respuesta del asistente."
-            if response_data.get("content"):
-                assistant_response_content = response_data.get("content")
-            elif response_data.get("error"):
-                 assistant_response_content = f"Error del asistente: {response_data.get('error')}"
-
-            # The assistant's message is saved by MessageRouter. Display it.
-            with messages_column:
-                # Assistant message with system avatar
-                with ui.row().classes('justify-start items-end gap-2 w-full'):
-                    with ui.avatar(size='sm').classes('flex-shrink-0'):
-                        ui.image('https://robohash.org/assistant?bgset=bg1&size=32x32').classes('rounded-full')
-                    with ui.element('div').classes('bg-gray-200 p-3 rounded-lg max-w-[80%]'):
-                        ui.markdown(assistant_response_content)
+            # Extract response content
+            response_content = message_router._extract_response_text(ai_response)
             
-            # 6. SCROLL: Show AI response
-            messages_container.scroll_to(percent=1e6)
+            # Step 2: IMMEDIATELY render AI response (before saving to DB)
+            assistant_response_content = response_content if response_content else "Error: No se pudo obtener respuesta del asistente."
 
-            if response_data.get("error") and response_data.get("error_type") == "non_critical":
-                ui.notify(f"Nota: {response_data['error']}", type='warning', timeout=5000)
-            elif response_data.get("error") and not response_data.get("content"):
-                 ui.notify(f"Error procesando el mensaje: {response_data['error']}", type='negative', timeout=5000)
+            if messages_column:
+                with messages_column:
+                    # Assistant message with system avatar
+                    with ui.row().classes('justify-start items-end gap-2 w-full'):
+                        with ui.avatar(size='sm').classes('flex-shrink-0'):
+                            ui.image('https://robohash.org/assistant?bgset=bg1&size=32x32').classes('rounded-full')
+                        with ui.element('div').classes('bg-gray-200 p-3 rounded-lg max-w-[80%]'):
+                            ui.markdown(assistant_response_content)
+                
+                # Scroll to show AI response immediately
+                messages_container.scroll_to(percent=1e6)
+
+            # Step 3: Save to database in background (non-blocking)
+            asyncio.create_task(save_messages_to_db(text, response_content, user_email, active_chat_id))
+
+            # Handle AI errors
+            if "error" in ai_response and response_content and not str(response_content).startswith("Error:"):
+                ui.notify(f"Nota: {ai_response.get('error')}", type='warning', timeout=5000)
+            elif "error" in ai_response and not response_content:
+                 ui.notify(f"Error procesando el mensaje: {ai_response.get('error')}", type='negative', timeout=5000)
 
         except Exception as e:
-            print(f"Critical error calling message router: {e}")
+            print(f"Critical error in AI processing: {e}")
             ui.notify(f"Error crítico del sistema: {e}", type='negative')
-            with messages_column:
-                 # Error message with system avatar
-                 with ui.row().classes('justify-start items-end gap-2 w-full'):
-                     with ui.avatar(size='sm').classes('flex-shrink-0'):
-                         ui.image('https://robohash.org/error?bgset=bg1&size=32x32').classes('rounded-full')
-                     with ui.element('div').classes('bg-red-100 text-red-700 p-3 rounded-lg max-w-[80%] border-l-4 border-red-500'):
-                        ui.markdown(f"**⚠️ Error del Sistema**\n\nNo se pudo obtener respuesta: {e}")
-            # Immediate scroll after error message
-            messages_container.scroll_to(percent=1e6)
+            if messages_column:
+                with messages_column:
+                     # Error message with system avatar
+                     with ui.row().classes('justify-start items-end gap-2 w-full'):
+                         with ui.avatar(size='sm').classes('flex-shrink-0'):
+                             ui.image('https://robohash.org/error?bgset=bg1&size=32x32').classes('rounded-full')
+                         with ui.element('div').classes('bg-red-100 text-red-700 p-3 rounded-lg max-w-[80%] border-l-4 border-red-500'):
+                            ui.markdown(f"**⚠️ Error del Sistema**\n\nNo se pudo obtener respuesta: {e}")
+                # Scroll after error message
+                messages_container.scroll_to(percent=1e6)
         finally:
             if spinner: spinner.visible = False
+            # Refresh sidebar after everything is done
+            update_chat_list.refresh()
 
-        update_chat_list.refresh() # Refresh sidebar, timestamps might have updated
+    async def save_messages_to_db(user_message: str, ai_response: str, user_email: str, active_chat_id: str):
+        """Save both user and AI messages to database in background."""
+        try:
+            # Get Firebase user data
+            current_user = FirebaseAuth.get_current_user()
+            firebase_uid = current_user.get('uid') if current_user else None
+            display_name = current_user.get('displayName') if current_user else None
+            
+            # Save user message
+            user_message_id = db_adapter.save_message(
+                user_email=user_email,
+                session_id=active_chat_id,
+                content=user_message,
+                role="user",
+                firebase_uid=firebase_uid,
+                display_name=display_name
+            )
+            
+            # Save AI response if we got one
+            if ai_response and not ai_response.startswith("Error:"):
+                assistant_message_id = db_adapter.save_message(
+                    user_email=user_email,
+                    session_id=active_chat_id,
+                    content=ai_response,
+                    role="assistant",
+                    firebase_uid=firebase_uid,
+                    display_name=display_name,
+                    model_used="FILC Agent"
+                )
+            
+            print(f"✅ Messages saved to DB for session {active_chat_id}")
+            
+        except Exception as e:
+            print(f"❌ Error saving messages to DB: {e}")
+            # Don't show UI error for background DB operations
+            # The user already sees their messages, DB is just for persistence
 
     async def send_current_message():
         """Send message from input field (for send button)."""
