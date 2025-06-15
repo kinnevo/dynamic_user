@@ -165,8 +165,11 @@ async def chat_page():
                 if key == 'Enter' and not shift_key:
                     # Enter without Shift: Send message immediately - no delays
                     if message_input.value.strip():
-                        # Send message and let the async function handle scrolling
-                        asyncio.create_task(send_current_message())
+                        # Clear input immediately for instant feedback
+                        message_text = message_input.value.strip()
+                        message_input.value = ''
+                        # Send message with the captured text
+                        asyncio.create_task(send_message_with_text(message_text))
             
             message_input.on('keydown', handle_keydown)
             
@@ -249,23 +252,17 @@ async def chat_page():
         # Direct scroll like reference script
         messages_container.scroll_to(percent=1e6)
 
-    async def send_current_message():
+    async def send_message_with_text(text: str):
+        """Send a message with pre-captured text (for immediate UI response)."""
         nonlocal messages_container, messages_column, message_input, spinner, send_button # These are accessed/modified
         user_email = app.storage.user.get('user_email')
         active_chat_id = app.storage.user.get('active_chat_id')
-        
-        if not message_input: # Guard against None
-            ui.notify("Error: El campo de mensaje no está inicializado.", type='negative')
-            return
-        text = message_input.value.strip()
         
         if not user_email or not text or not active_chat_id:
             ui.notify("Error: No se pudo enviar el mensaje (usuario, texto o chat activo faltante).", type='negative')
             if not active_chat_id:
                  await start_new_chat() # Or prompt user to start new chat
             return
-        
-        message_input.value = '' # Clear input immediately
         
         # Show spinner (keep send button visible)
         if spinner: spinner.visible = True
@@ -328,6 +325,16 @@ async def chat_page():
             if spinner: spinner.visible = False
 
         update_chat_list.refresh() # Refresh sidebar, timestamps might have updated
+
+    async def send_current_message():
+        """Send message from input field (for send button)."""
+        if not message_input: # Guard against None
+            ui.notify("Error: El campo de mensaje no está inicializado.", type='negative')
+            return
+        text = message_input.value.strip()
+        if text:
+            message_input.value = '' # Clear input immediately
+            await send_message_with_text(text)
 
     # --- Initial Page Load Logic ---
     user_email = app.storage.user.get('user_email')
