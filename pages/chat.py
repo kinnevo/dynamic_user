@@ -5,6 +5,7 @@ from utils.layouts import create_navigation_menu_2
 from utils.database_singleton import get_db
 from utils.auth_middleware import auth_required
 from utils.firebase_auth import FirebaseAuth
+from utils.filc_agent_client import FilcAgentClient
 from datetime import datetime
 import asyncio
 from typing import Optional
