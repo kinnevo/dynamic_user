@@ -51,5 +51,5 @@ LANGFLOW_INTEGRATION.md
 # Service account
 firebase-serviceaccount.json
 
-# Deployment
+# Cloud Run Deployment
 deploy-to-cloud-run.sh

@@ -33,10 +33,15 @@ class FilcAgentClient:
         # Use environment variable if no api_key is provided
         self.api_key = api_key or os.getenv("FILC_API_KEY")
         
-        self.chat_endpoint = "/api/v1/agent/chat"
+        self.chat_endpoint = "/api/v1/agent/chat/optimized"
+        self.chat_stream_endpoint = "/api/v1/agent/chat/stream/optimized"
+        api_key = os.getenv('FILC_API_KEY')
+        if not api_key:
+            raise ValueError("FILC_API_KEY environment variable is required")
         self.headers = {
             'accept': 'application/json',
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'X-API-Key': api_key
         }
         
         # Add API key to headers if available
@@ -74,6 +79,153 @@ class FilcAgentClient:
         except Exception as e:
             self.connection_status = "error"
             return False, f"Connection error: {str(e)}"
+    
+    async def process_message_stream(self, message: str, session_id: str, 
+                                   history: List[Dict[str, str]] = None):
+        """Send a message and get a streaming response from the FILC Agent API"""
+        # Prepare the same payload as process_message
+        payload = {
+            "message": message,
+            "session_id": session_id,
+            "context": {}
+        }
+        
+        # Handle conversation history (same logic as process_message)
+        if history and len(history) > 0:
+            conversation_history = []
+            for msg in history:
+                if isinstance(msg, dict) and 'role' in msg and 'content' in msg:
+                    conversation_history.append({
+                        "role": msg['role'],
+                        "content": msg['content']
+                    })
+            
+            if conversation_history:
+                payload["conversation_history"] = conversation_history
+                print(f"FILC Agent Stream: Using provided conversation history with {len(conversation_history)} messages")
+        
+        elif history is not None and len(history) == 0:
+            try:
+                from utils.database_singleton import get_db
+                db_adapter = await get_db()
+                
+                existing_history = await db_adapter.get_conversation_history(session_id)
+                
+                if existing_history and len(existing_history) > 0:
+                    last_messages = existing_history[-10:] if len(existing_history) > 10 else existing_history
+                    
+                    conversation_history = []
+                    for msg in last_messages:
+                        if isinstance(msg, dict) and 'role' in msg and 'content' in msg:
+                            conversation_history.append({
+                                "role": msg['role'],
+                                "content": msg['content']
+                            })
+                    
+                    if conversation_history:
+                        payload["conversation_history"] = conversation_history
+                        print(f"FILC Agent Stream: Retrieved and using last {len(conversation_history)} messages from DB")
+                else:
+                    print(f"FILC Agent Stream: New conversation detected")
+                    
+            except Exception as e:
+                print(f"FILC Agent Stream: Warning - Could not fetch conversation history from DB: {e}")
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{self.base_url}{self.chat_stream_endpoint}",
+                    headers=self.headers,
+                    json=payload,
+                    timeout=60
+                ) as response:
+                    if response.status == 200:
+                        self.connection_status = "connected"
+                        
+                        # Stream the response
+                        full_response = ""
+                        async for line in response.content:
+                            if line:
+                                try:
+                                    # Decode the line
+                                    line_text = line.decode('utf-8').strip()
+                                    
+                                    # Skip empty lines
+                                    if not line_text:
+                                        continue
+                                    
+                                    # Handle Server-Sent Events format
+                                    if line_text.startswith('data: '):
+                                        data_part = line_text[6:]  # Remove 'data: ' prefix
+                                        
+                                        # Skip [DONE] marker
+                                        if data_part == '[DONE]':
+                                            break
+                                        
+                                        try:
+                                            # Parse JSON chunk
+                                            chunk_data = json.loads(data_part)
+                                            # The API returns 'chunk' field, not 'content'
+                                            chunk_text = chunk_data.get('chunk', '')
+                                            is_finished = chunk_data.get('finished', False)
+                                            
+                                            # Always yield chunks, even if content is empty (for final chunk)
+                                            if chunk_text or is_finished:
+                                                if chunk_text:
+                                                    full_response += chunk_text
+                                                
+                                                # Yield each chunk for real-time streaming
+                                                yield {
+                                                    "content": chunk_text,
+                                                    "full_content": full_response,
+                                                    "success": True,
+                                                    "is_chunk": not is_finished,
+                                                    "is_final": is_finished
+                                                }
+                                            
+                                            # If finished, break the loop
+                                            if is_finished:
+                                                break
+                                        except json.JSONDecodeError:
+                                            # If not JSON, treat as plain text chunk
+                                            if data_part:
+                                                full_response += data_part
+                                                yield {
+                                                    "content": data_part,
+                                                    "full_content": full_response,
+                                                    "success": True,
+                                                    "is_chunk": True
+                                                }
+                                    
+                                except UnicodeDecodeError:
+                                    continue
+                        
+                        # Stream is complete - final chunk was already sent with finished=true
+                        pass
+                        
+                    else:
+                        self.connection_status = "error"
+                        error_text = await response.text()
+                        yield {
+                            "error": f"API Error (Status {response.status}): {error_text}",
+                            "success": False,
+                            "is_final": True
+                        }
+                        
+        except asyncio.TimeoutError:
+            self.connection_status = "timeout"
+            yield {
+                "error": "Request timed out",
+                "success": False,
+                "is_final": True
+            }
+        except Exception as e:
+            self.connection_status = "error"
+            yield {
+                "error": f"Request failed: {str(e)}",
+                "success": False,
+                "is_final": True
+            }
     
     async def process_message(self, message: str, session_id: str, 
                               history: List[Dict[str, str]] = None) -> Dict[str, Any]:

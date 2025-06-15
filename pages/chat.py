@@ -4,16 +4,35 @@ from utils.message_router import MessageRouter
 from utils.layouts import create_navigation_menu_2
 from utils.database_singleton import get_db
 from utils.auth_middleware import auth_required
+from utils.firebase_auth import FirebaseAuth
 from utils.filc_agent_client import FilcAgentClient
 from datetime import datetime
 import asyncio
 from typing import Optional
 
 @ui.page('/chat')
-@auth_required 
+# @auth_required TODO: turn on when we have a way to handle auth
 async def chat_page():
-    """Chat interface with sidebar for managing multiple chat sessions and FILC Agent integration."""
+    """Chat interface with sidebar for managing multiple chat sessions and FILC Agent streaming integration."""
     create_navigation_menu_2()
+    
+    # Add custom CSS for streaming animations
+    ui.add_head_html('''
+    <style>
+    .streaming-response {
+        animation: none !important;
+    }
+    .streaming-indicator {
+        display: inline-block;
+        animation: pulse 1.5s ease-in-out infinite;
+    }
+    @keyframes pulse {
+        0% { opacity: 1; }
+        50% { opacity: 0.5; }
+        100% { opacity: 1; }
+    }
+    </style>
+    ''')
     
     # Initialize components inside function to avoid module-level database calls
     message_router = MessageRouter()
@@ -23,7 +42,6 @@ async def chat_page():
     # --- UI Element Variables (defined early for access in helpers) ---
     messages_container: Optional[ui.column] = None
     message_input: Optional[ui.input] = None
-    spinner: Optional[ui.spinner] = None
     chat_list_ui: Optional[ui.column] = None
 
     # --- Helper Functions ---
@@ -38,14 +56,24 @@ async def chat_page():
                 return ts 
         return ts.strftime("%Y-%m-%d %H:%M")
 
+    def generate_user_avatar(user_email):
+        """Generate a unique avatar URL based on user email."""
+        if not user_email:
+            # Fallback to a default avatar if no email
+            return 'https://robohash.org/default?bgset=bg2&size=64x64'
+        # Use robohash.org to generate consistent avatars based on email
+        return f'https://robohash.org/{user_email}?bgset=bg2&size=64x64'
+
+
+
     async def load_and_display_chat_history(chat_id: str):
-        nonlocal messages_container, message_input, spinner # Ensure these are from chat_page scope
+        nonlocal messages_container, messages_column, message_input # Ensure these are from chat_page scope
         
-        if not messages_container: return
-        messages_container.clear()
+        if not messages_column: return
+        messages_column.clear()
 
         if not chat_id:
-            with messages_container:
+            with messages_column:
                 ui.label("Select a chat or start a new one.").classes('text-center m-auto')
             if message_input: message_input.disable()
             return
@@ -53,88 +81,58 @@ async def chat_page():
         app.storage.user['active_chat_id'] = chat_id
         print(f"Loading history for active_chat_id: {chat_id}")
         
-        if spinner: spinner.visible = True
         try:
-            history = await db_adapter.get_conversation_history(session_id=chat_id)
-            if not messages_container: return
+            history = await db_adapter.get_recent_messages(session_id=chat_id, limit=100)
+            if not messages_column: return 
             
             if not history:
-                with messages_container:
-                    ui.markdown("Bienvenido! Describe tu idea y desarrollemosla juntos.").classes('self-start bg-gray-200 p-3 rounded-lg max-w-[80%]')
+                with messages_column:
+                    # Welcome message with assistant avatar
+                    with ui.row().classes('justify-start items-end gap-2 w-full'):
+                        with ui.avatar(size='sm').classes('flex-shrink-0'):
+                            ui.image('https://robohash.org/assistant?bgset=bg1&size=32x32').classes('rounded-full')
+                        with ui.element('div').classes('bg-gray-200 p-3 rounded-lg max-w-[80%]'):
+                            ui.markdown("Bienvenido! Describe tu idea y desarrollemosla juntos.")
             else:
-                with messages_container:
+                with messages_column:
                     for message in history:
                         if message['role'] == 'user':
-                            with ui.element('div').classes('self-end bg-blue-500 text-white p-3 rounded-lg max-w-[80%]'):
-                                ui.markdown(message['content'])
+                            # User message with avatar
+                            with ui.row().classes('justify-end items-end gap-2 w-full'):
+                                with ui.element('div').classes('bg-blue-500 text-white p-3 rounded-lg max-w-[80%]'):
+                                    ui.markdown(message['content'])
+                                with ui.avatar(size='sm').classes('flex-shrink-0'):
+                                    ui.image(generate_user_avatar(user_email)).classes('rounded-full')
                         else: # assistant
-                            with ui.element('div').classes('self-start bg-gray-200 p-3 rounded-lg max-w-[80%]'):
-                                ui.markdown(message['content'])
-            
-            # Add spacer at the bottom after messages
-            with messages_container:
-                ui.space().classes('h-8')
-                
-            await scroll_to_bottom()
+                            # Assistant message with system avatar
+                            with ui.row().classes('justify-start items-end gap-2 w-full'):
+                                with ui.avatar(size='sm').classes('flex-shrink-0'):
+                                    ui.image('https://robohash.org/assistant?bgset=bg1&size=32x32').classes('rounded-full')
+                                with ui.element('div').classes('bg-gray-200 p-3 rounded-lg max-w-[80%]'):
+                                    ui.markdown(message['content'])
+            # Direct scroll using the scroll area - like in reference script
+            messages_container.scroll_to(percent=1e6)
             if message_input: message_input.enable()
         except Exception as e:
             print(f"Error loading chat history for {chat_id}: {e}")
             ui.notify(f"Error al cargar el historial del chat: {e}", type='negative')
-            if messages_container:
-                with messages_container:
+            if messages_column:
+                with messages_column:
                     ui.label(f"Error al cargar el chat {chat_id}.").classes('text-negative')
-        finally:
-            if spinner: spinner.visible = False
-        update_chat_list.refresh() # Remove await - refresh() is not async
+        refresh_task = update_chat_list.refresh()
+        if refresh_task is not None:
+            await refresh_task
 
-    async def scroll_to_bottom():
-        """Enhanced scroll function with multiple fallback methods."""
+    def scroll_to_bottom():
+        """Direct scroll using NiceGUI scroll_area method - like reference script."""
         nonlocal messages_container
-        if not messages_container:
-            return
-            
-        try:
-            # Fire-and-forget JavaScript call with multiple methods
-            ui.run_javascript(f'''
-                setTimeout(() => {{
-                    // Method 1: Direct element access
-                    try {{
-                        const el = getElement({messages_container.id});
-                        if (el) {{
-                            el.scrollTop = el.scrollHeight;
-                            console.log('Scrolled using element ID');
-                            return;
-                        }}
-                    }} catch (e) {{
-                        console.log('Element ID failed:', e);
-                    }}
-                    
-                    // Method 2: Find overflow-y-auto containers
-                    const containers = document.querySelectorAll('[class*="overflow-y-auto"]');
-                    for (let container of containers) {{
-                        if (container.scrollHeight > container.clientHeight) {{
-                            container.scrollTop = container.scrollHeight;
-                            console.log('Scrolled using overflow-y-auto method');
-                            return;
-                        }}
-                    }}
-                    
-                    // Method 3: Find any scrollable container
-                    const allContainers = document.querySelectorAll('div');
-                    for (let container of allContainers) {{
-                        if (container.scrollHeight > container.clientHeight) {{
-                            container.scrollTop = container.scrollHeight;
-                            console.log('Scrolled using fallback method');
-                            return;
-                        }}
-                    }}
-                    
-                    console.log('No scrollable container found');
-                }}, 150);
-            ''')
-        except Exception as e:
-            print(f"Scroll error: {e}")
-            pass
+        if messages_container:
+            try:
+                # Direct method like in reference script
+                messages_container.scroll_to(percent=1e6)
+            except Exception as e:
+                print(f"Scroll error: {e}")
+                pass
 
     # --- Main UI Structure ---
     # Header with status indicator
@@ -142,6 +140,7 @@ async def chat_page():
         # Left side with title
         with ui.row().classes('items-center gap-2'):
             ui.label('Chat with FILC Agent').classes('text-h5 font-semibold')
+            ui.badge('Streaming Optimized', color='green').classes('text-xs')
         
         # Right side with status indicator and check button
         with ui.row().classes('items-center gap-2'):
@@ -201,109 +200,57 @@ async def chat_page():
             # Container for the list of chats (will be @ui.refreshable)
             chat_list_ui = ui.column().classes('w-full gap-1 mt-2')
 
-    # Main content area with improved layout to eliminate bottom whitespace
-    with ui.element('div').classes('flex flex-col w-full').style('height: calc(100vh - 10.8vh); max-height: calc(100vh - 4vh);'):  # Account for header + navigation + padding
-        # Messages area - takes up available space
-        with ui.element('div').classes('flex-1 w-full relative overflow-hidden'):
-            messages_container = ui.column().classes(
-                'absolute inset-0 overflow-y-auto p-4 gap-2' 
-            )
-            # Spinner is defined and placed here, centered over messages_container
-            spinner = ui.spinner('dots', size='lg', color='primary').classes(
-                'absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2'
-            )
-            if spinner: spinner.visible = False # Start hidden
-        
-        # Input area - fixed at bottom with no extra margin/padding
-        with ui.row().classes('flex-shrink-0 w-full p-4 bg-white border-t items-center gap-2').style('margin: 0; padding-bottom: 16px;'):
-            message_input = ui.input(placeholder='Escribe tu mensaje...').classes('flex-1')
-            
-            # Send button - define the function first, then use it
-            send_button = ui.button('Send', on_click=lambda: send_current_message()).classes('bg-blue-500 text-white')
-            
-    async def send_current_message():
-        nonlocal messages_container, message_input, spinner # These are accessed/modified
-        user_email = app.storage.user.get('user_email')
-        active_chat_id = app.storage.user.get('active_chat_id')
-        
-        if not message_input: # Guard against None
-            ui.notify("Error: El campo de mensaje no está inicializado.", type='negative')
-            return
-        text = message_input.value.strip()
-        
-        if not user_email or not text or not active_chat_id:
-            ui.notify("Error: No se pudo enviar el mensaje (usuario, texto o chat activo faltante).", type='negative')
-            if not active_chat_id:
-                 await start_new_chat() # Or prompt user to start new chat
-            return
-        
-        message_input.value = '' # Clear input immediately
 
-        if not messages_container: return
+    # Main chat area
+    with ui.column().classes('w-full h-screen p-0 m-0 flex flex-col ').style('height: 89vh'): # Custom height override
+        # Use ui.scroll_area like in the reference script for better scroll control
+        messages_container = ui.scroll_area().classes('flex-grow w-full p-4')
         with messages_container:
-            with ui.element('div').classes('self-end bg-blue-500 text-white p-3 rounded-lg max-w-[80%]'):
-                ui.markdown(text)
+            # Container for messages inside the scroll area
+            messages_column = ui.column().classes('gap-2 w-full')
         
-        # Small delay to ensure DOM is updated, then scroll
-        await scroll_to_bottom()
-
-        if spinner: spinner.visible = True
-        try:
-            response_data = await message_router.process_user_message(
-                message=text,
-                user_email=user_email,
-                session_id=active_chat_id
-            )
-            
-            assistant_response_content = "Error: No se pudo obtener respuesta del asistente."
-            if response_data.get("content"):
-                assistant_response_content = response_data.get("content")
-            elif response_data.get("error"):
-                 assistant_response_content = f"Error del asistente: {response_data.get('error')}"
-
-            # The assistant's message is saved by MessageRouter. Display it.
-            with messages_container:
-                with ui.element('div').classes('self-start bg-gray-200 p-3 rounded-lg max-w-[80%]'):
-                    ui.markdown(assistant_response_content)
-            
-            # Add spacer at the bottom after messages
-            with messages_container:
-                ui.space().classes('h-8')
-            
-            # Small delay to ensure DOM is updated, then scroll
-            await scroll_to_bottom()
-
-            # Handle errors - only display significant errors, not connection warnings
-            if response_data.get("error"):
-                error_message = response_data.get("error")
-                is_connection_warning = ('connection' in error_message.lower() or 'timeout' in error_message.lower())
+        # Input area (footer) with user avatar
+        with ui.row().classes('w-full p-4 bg-gray-50 border-t items-center gap-3'):
+            # User Avatar
+            user_email = app.storage.user.get('user_email', '')
+            avatar_url = generate_user_avatar(user_email)
+            with ui.avatar(size='md').classes('flex-shrink-0'):
+                ui.image(avatar_url).classes('rounded-full')
                 
-                if response_data.get("error_type") == "non_critical" or is_connection_warning:
-                    if not is_connection_warning:
-                        ui.notify(f"Nota: {response_data['error']}", type='warning', timeout=5000)
-                elif not response_data.get("content"):
-                    short_error = error_message.split('\n')[0] if '\n' in error_message else error_message
-                    ui.notify(f"Error procesando el mensaje: {short_error}", type='negative', timeout=10000)
-                    
-                    # For severe errors that prevent message delivery
-                    with messages_container:
-                        with ui.element('div').classes('self-start bg-red-100 p-3 rounded-lg max-w-[80%] border-l-4 border-red-500'):
-                            ui.markdown("**⚠️ Error del Sistema**\n\nHubo un problema procesando tu solicitud. El mensaje fue guardado pero no se pudo generar la respuesta del AI.")
-
-        except Exception as e:
-            print(f"Critical error calling message router: {e}")
-            ui.notify(f"Error crítico del sistema: {e}", type='negative')
-            with messages_container:
-                 with ui.element('div').classes('self-start bg-red-100 text-red-700 p-3 rounded-lg max-w-[80%] border-l-4 border-red-500'):
-                    ui.markdown(f"**⚠️ Error del Sistema**\n\nNo se pudo obtener respuesta: {e}")
-            await scroll_to_bottom()
-        finally:
-            if spinner: spinner.visible = False
-        update_chat_list.refresh() # Remove await - refresh() is not async
-
-    # Set up Enter key handler after function is defined
-    if message_input:
-        message_input.on('keydown.enter', send_current_message)
+            # Create textarea with proper event handling
+            message_input = ui.textarea(placeholder='Escribe tu mensaje... (Shift+Enter para nueva línea)') \
+                .classes('flex-grow') \
+                .props('outlined dense rows=1 auto-grow')
+            
+                        # Handle Enter key with immediate response
+            def handle_keydown(e):
+                key = e.args.get('key')
+                shift_key = e.args.get('shiftKey', False)
+                
+                if key == 'Enter' and not shift_key:
+                    # Enter without Shift: Send message immediately - no delays
+                    if message_input.value.strip():
+                        # Clear input immediately for instant feedback
+                        message_text = message_input.value.strip()
+                        message_input.value = ''
+                        # Send message with the captured text
+                        asyncio.create_task(send_message_with_text(message_text))
+            
+            message_input.on('keydown', handle_keydown)
+            
+            # Add immediate JavaScript to prevent Enter from adding newlines (no delay)
+            ui.run_javascript(f'''
+                const textarea = document.getElementById('c{message_input.id}');
+                if (textarea) {{
+                    textarea.addEventListener('keydown', function(e) {{
+                        if (e.key === 'Enter' && !e.shiftKey) {{
+                            e.preventDefault();
+                        }}
+                    }});
+                }}
+            ''')
+            
+            send_button = ui.button(icon='send', on_click=lambda: send_current_message()).props('round flat color=primary')
             
     # --- Chat Logic & Refreshable Components ---
     @ui.refreshable
@@ -350,21 +297,160 @@ async def chat_page():
         await load_and_display_chat_history(chat_id) 
 
     async def start_new_chat():
-        nonlocal messages_container, message_input # These are modified
+        nonlocal messages_container, messages_column, message_input # These are modified
         new_id = str(uuid.uuid4())
         app.storage.user['active_chat_id'] = new_id
         print(f"Starting new chat with ID: {new_id}")
-        if messages_container:
-            messages_container.clear()
-            with messages_container:
-                 ui.markdown("Nuevo chat iniciado. Describe tu idea y desarrollemosla juntos.").classes('self-start bg-gray-200 p-3 rounded-lg max-w-[80%]')
-                 # Add spacer at the bottom
-                 ui.space().classes('h-8')
+        if messages_column:
+            messages_column.clear()
+            with messages_column:
+                 # New chat welcome message with assistant avatar
+                 with ui.row().classes('justify-start items-end gap-2 w-full'):
+                     with ui.avatar(size='sm').classes('flex-shrink-0'):
+                         ui.image('https://robohash.org/assistant?bgset=bg1&size=32x32').classes('rounded-full')
+                     with ui.element('div').classes('bg-gray-200 p-3 rounded-lg max-w-[80%]'):
+                         ui.markdown("Nuevo chat iniciado. Describe tu idea y desarrollemosla juntos.")
         if message_input:
             message_input.enable()
             message_input.value = ''
-        update_chat_list.refresh() # Remove await - refresh() is not async
-        await scroll_to_bottom()
+        refresh_task = update_chat_list.refresh()
+        if refresh_task is not None:
+            await refresh_task
+        # Direct scroll like reference script
+        messages_container.scroll_to(percent=1e6)
+
+    async def send_message_with_text(text: str):
+        """Send a message with pre-captured text (for immediate UI response)."""
+        nonlocal messages_container, messages_column, message_input, send_button # These are accessed/modified
+        user_email = app.storage.user.get('user_email')
+        active_chat_id = app.storage.user.get('active_chat_id')
+        
+        if not user_email or not text or not active_chat_id:
+            ui.notify("Error: No se pudo enviar el mensaje (usuario, texto o chat activo faltante).", type='negative')
+            if not active_chat_id:
+                 await start_new_chat() # Or prompt user to start new chat
+            return
+
+        # 1. IMMEDIATE: Render user message in UI (no waiting for anything)
+        if not messages_column: return
+        with messages_column:
+            # User message with avatar
+            with ui.row().classes('justify-end items-end gap-2 w-full'):
+                with ui.element('div').classes('bg-blue-500 text-white p-3 rounded-lg max-w-[80%]'):
+                    ui.markdown(text)
+                with ui.avatar(size='sm').classes('flex-shrink-0'):
+                    ui.image(generate_user_avatar(user_email)).classes('rounded-full')
+        
+        # 2. IMMEDIATE: Scroll to show user message
+        messages_container.scroll_to(percent=1e6)
+        
+        # 3. ASYNC: Start AI processing first, then DB operations
+        asyncio.create_task(process_ai_then_save_to_db(text, user_email, active_chat_id))
+
+    async def process_ai_then_save_to_db(text: str, user_email: str, active_chat_id: str):
+        """Handle AI processing first, then DB operations asynchronously."""
+        nonlocal messages_container, messages_column
+        
+        try:
+            # Step 1: Get AI response directly (no DB operations yet)
+            # Get conversation history for context
+            history = await db_adapter.get_conversation_history(active_chat_id)
+            
+            # Stream AI response for real-time updates
+            assistant_message_div = None
+            assistant_markdown = None
+            full_response = ""
+            
+            # Step 2: Create assistant message container immediately
+            if messages_column:
+                with messages_column:
+                    # Assistant message with system avatar
+                    with ui.row().classes('justify-start items-end gap-2 w-full'):
+                        with ui.avatar(size='sm').classes('flex-shrink-0'):
+                            ui.image('https://robohash.org/assistant?bgset=bg1&size=32x32').classes('rounded-full')
+                        assistant_message_div = ui.element('div').classes('bg-gray-200 p-3 rounded-lg max-w-[80%]')
+                        with assistant_message_div:
+                            assistant_markdown = ui.markdown("🤖 **Generando respuesta...**").classes('streaming-response')
+                
+                # Scroll to show initial AI response container
+                messages_container.scroll_to(percent=1e6)
+            
+            # Step 3: Stream response chunks
+            try:
+                async for chunk in message_router.process_user_message_stream(
+                    message=text,
+                    user_email=user_email,
+                    session_id=active_chat_id
+                ):
+                    if chunk.get("success"):
+                        if chunk.get("is_chunk", False):
+                            # Update the markdown content with streaming text
+                            chunk_content = chunk.get("full_content", "")
+                            if assistant_markdown and chunk_content:
+                                # Simply update content - don't try to modify classes
+                                assistant_markdown.content = chunk_content
+                                # Force UI update for smooth streaming
+                                await asyncio.sleep(0.01)
+                                # Scroll to bottom after each chunk
+                                messages_container.scroll_to(percent=1e6)
+                        
+                        elif chunk.get("is_final", False):
+                            # Final update
+                            final_content = chunk.get("content", "")
+                            if assistant_markdown and final_content:
+                                assistant_markdown.content = final_content
+                                # Don't try to modify classes - just update content
+                                full_response = final_content
+                            messages_container.scroll_to(percent=1e6)
+                            break
+                    else:
+                        # Handle streaming error
+                        error_content = f"**⚠️ Error del Sistema**\n\n{chunk.get('error', 'Error desconocido')}"
+                        if assistant_markdown:
+                            assistant_markdown.content = error_content
+                            assistant_message_div.classes('bg-red-100 text-red-700 border-l-4 border-red-500')
+                        messages_container.scroll_to(percent=1e6)
+                        break
+                        
+            except Exception as stream_error:
+                print(f"❌ Streaming error: {stream_error}")
+                # Handle streaming failure
+                error_content = f"**⚠️ Error de Conexión**\n\nNo se pudo establecer conexión de streaming: {stream_error}"
+                if assistant_markdown:
+                    assistant_markdown.content = error_content
+                    assistant_message_div.classes('bg-red-100 text-red-700 border-l-4 border-red-500')
+                messages_container.scroll_to(percent=1e6)
+
+        except Exception as e:
+            print(f"❌ Critical error in AI processing: {e}")
+            # Can't use ui.notify from background task, so render error message directly
+            if messages_column:
+                with messages_column:
+                     # Error message with system avatar
+                     with ui.row().classes('justify-start items-end gap-2 w-full'):
+                         with ui.avatar(size='sm').classes('flex-shrink-0'):
+                             ui.image('https://robohash.org/error?bgset=bg1&size=32x32').classes('rounded-full')
+                         with ui.element('div').classes('bg-red-100 text-red-700 p-3 rounded-lg max-w-[80%] border-l-4 border-red-500'):
+                            ui.markdown(f"**⚠️ Error del Sistema**\n\nNo se pudo obtener respuesta: {e}")
+                # Scroll after error message
+                messages_container.scroll_to(percent=1e6)
+        finally:
+            # Refresh sidebar after everything is done
+            refresh_task = update_chat_list.refresh()
+            if refresh_task is not None:
+                await refresh_task
+
+
+
+    async def send_current_message():
+        """Send message from input field (for send button)."""
+        if not message_input: # Guard against None
+            ui.notify("Error: El campo de mensaje no está inicializado.", type='negative')
+            return
+        text = message_input.value.strip()
+        if text:
+            message_input.value = '' # Clear input immediately
+            await send_message_with_text(text)
 
     # --- Initial Page Load Logic ---
     user_email = app.storage.user.get('user_email')
@@ -386,9 +472,13 @@ async def chat_page():
             await load_and_display_chat_history(most_recent_chat_id)
             # load_and_display_chat_history already calls update_chat_list.refresh()
         else:
-            if messages_container: messages_container.clear()
-            if messages_container:
-                with messages_container:
-                    ui.markdown("Bienvenido! Inicia un nuevo chat para comenzar o selecciona uno anterior si existe.").classes('self-start bg-gray-200 p-3 rounded-lg max-w-[80%]')
-                    ui.space().classes('h-8')
+            if messages_column: messages_column.clear()
+            if messages_column:
+                with messages_column:
+                    # Default welcome message with assistant avatar
+                    with ui.row().classes('justify-start items-end gap-2 w-full'):
+                        with ui.avatar(size='sm').classes('flex-shrink-0'):
+                            ui.image('https://robohash.org/assistant?bgset=bg1&size=32x32').classes('rounded-full')
+                        with ui.element('div').classes('bg-gray-200 p-3 rounded-lg max-w-[80%]'):
+                            ui.markdown("Bienvenido! Inicia un nuevo chat para comenzar o selecciona uno anterior si existe.")
             if message_input: message_input.disable()
