@@ -218,7 +218,6 @@ class MessageRouter:
                 display_name=display_name
             )
             
-            print(f"✅ Saved message {user_message_id}")
             print(f"✅ User message saved with ID: {user_message_id}")
             
             if not user_message_id:
