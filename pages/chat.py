@@ -411,6 +411,11 @@ async def chat_page():
                             # Update the markdown content with streaming text
                             chunk_content = chunk.get("full_content", "")
                             if assistant_markdown and chunk_content:
+                                # Remove typing indicator on first chunk
+                                try:
+                                    assistant_markdown.classes('streaming-response')  # Reset to just streaming-response
+                                except:
+                                    pass  # If classes method fails, continue anyway
                                 assistant_markdown.content = chunk_content
                                 # Force UI update for smooth streaming
                                 await asyncio.sleep(0.01)
@@ -422,6 +427,11 @@ async def chat_page():
                             final_content = chunk.get("content", "")
                             if assistant_markdown and final_content:
                                 assistant_markdown.content = final_content
+                                # Remove typing indicator class
+                                try:
+                                    assistant_markdown.classes('streaming-response')  # Reset to clean classes
+                                except:
+                                    pass  # If classes method fails, continue anyway
                                 full_response = final_content
                             messages_container.scroll_to(percent=1e6)
                             break

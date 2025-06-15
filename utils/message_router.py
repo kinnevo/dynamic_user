@@ -216,6 +216,8 @@ class MessageRouter:
                 display_name=display_name
             )
             
+            print(f"✅ User message saved with ID: {user_message_id}")
+            
             if not user_message_id:
                 yield {"error": "Failed to save user message.", "is_final": True}
                 return
@@ -251,34 +253,50 @@ class MessageRouter:
                     
                     elif chunk.get("is_final", False):
                         # Final chunk - save to database
-                        full_response = chunk.get("content", "")
+                        # Use the accumulated full_response, not just the final chunk content
+                        final_chunk_content = chunk.get("content", "")
+                        if final_chunk_content:
+                            full_response = final_chunk_content
+                        # If final chunk is empty, use the accumulated response
                         
-                        # Save assistant response
-                        if full_response:
-                            await db_adapter.save_message(
-                                user_email=user_email,
-                                session_id=session_id,
-                                content=full_response,
-                                role="assistant",
-                                firebase_uid=firebase_uid,
-                                display_name=display_name,
-                                model_used="FILC Agent Optimized"
-                            )
+                        print(f"📝 Final chunk received. Full response length: {len(full_response)}")
                         
-                        # Update user status
-                        await db_adapter.update_user_status(
-                            identifier=user_email, 
-                            status="CompletedInteraction", 
-                            is_email=True
-                        )
-                        
-                        # Send final chunk
+                        # Send final chunk to user IMMEDIATELY for fastest experience
                         yield {
                             "content": full_response,
                             "full_content": full_response,
                             "is_final": True,
                             "success": True
                         }
+                        
+                        # Save assistant response in background (fire-and-forget for speed)
+                        async def save_final_message():
+                            try:
+                                if full_response:
+                                    assistant_message_id = await db_adapter.save_message(
+                                        user_email=user_email,
+                                        session_id=session_id,
+                                        content=full_response,
+                                        role="assistant",
+                                        firebase_uid=firebase_uid,
+                                        display_name=display_name,
+                                        model_used="FILC Agent Optimized"
+                                    )
+                                    print(f"✅ Assistant message saved with ID: {assistant_message_id}")
+                                else:
+                                    print("⚠️ No assistant response to save - full_response is empty")
+                                
+                                # Update user status
+                                await db_adapter.update_user_status(
+                                    identifier=user_email, 
+                                    status="CompletedInteraction", 
+                                    is_email=True
+                                )
+                            except Exception as e:
+                                print(f"❌ Error saving final message: {e}")
+                        
+                        # Start background save (non-blocking)
+                        asyncio.create_task(save_final_message())
                         break
                 else:
                     # Error chunk
