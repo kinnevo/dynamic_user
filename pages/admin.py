@@ -623,7 +623,35 @@ class AdminPageManager:
         """Handles row clicks, showing user details."""
         print(f"Row selected: {e}")
         if isinstance(e, dict):  # Check if we got row data
-            await show_user_details(e, client=self.client)
+            # Show loading spinner immediately
+            if self.client and self.client.has_socket_connection:
+                await self.client.run_javascript("""
+                // Create full-screen loading overlay
+                let loadingOverlay = document.createElement('div');
+                loadingOverlay.id = 'user_details_loading';
+                loadingOverlay.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]';
+                loadingOverlay.innerHTML = `
+                    <div class="bg-white rounded-lg p-8 shadow-xl flex flex-col items-center">
+                        <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
+                        <p class="text-gray-700 font-medium">Loading user details...</p>
+                        <p class="text-gray-500 text-sm mt-1">Fetching conversations and data</p>
+                    </div>
+                `;
+                document.body.appendChild(loadingOverlay);
+                """)
+            
+            try:
+                await show_user_details(e, client=self.client)
+            finally:
+                # Hide loading spinner
+                if self.client and self.client.has_socket_connection:
+                    await self.client.run_javascript("""
+                    let loadingOverlay = document.getElementById('user_details_loading');
+                    if (loadingOverlay) {
+                        document.body.removeChild(loadingOverlay);
+                    }
+                    """)
+            
             if self.users_table:
                 self.users_table.selected = []
         elif e is None: pass # Handle deselection if needed
