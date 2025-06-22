@@ -19,7 +19,7 @@ def get_filc_api_url():
         environment = "development"
     
     if environment == "production":
-        return os.getenv("FILC_API_URL_PRODUCTION", "https://filc-production.up.railway.app")
+        return os.getenv("FILC_API_URL_PRODUCTION", "https://langchain-api-604277815223.us-central1.run.app")
     else:
         return os.getenv("FILC_API_URL_LOCAL", "http://localhost:3000")
 
