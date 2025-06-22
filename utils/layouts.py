@@ -192,21 +192,28 @@ def create_user_selector(container=None, width='w-1/3'):
             return {'error': 'Error loading users'}
     
     # Create user select with multi-selection
-    # Start with basic options, will be populated by refresh
+    # Start with empty value to avoid rendering issues
     user_select = container.select(
         options={'all': 'All Users'}, 
         multiple=True,
-        value=['all']  # Default to 'all' selected
+        value=[]  # Start empty, will be set after options load
     ).classes(width)
     user_select.props('dense outlined label="Select Users" clearable use-chips')
     
     async def refresh_users():
         try:
             new_options_dict = await load_user_options()
+            
+            # Set options first
             user_select.options = new_options_dict
             
-            # Set default selection to only "All Users"
+            # Small delay to ensure options are rendered before setting value
+            import asyncio
+            await asyncio.sleep(0.1)
+            
+            # Then set default selection to only "All Users"
             user_select.value = ['all']  # Only select 'all' option by default
+            
         except Exception as e:
             print(f'Error refreshing users: {str(e)}')  # Use print instead of ui.notify
     
