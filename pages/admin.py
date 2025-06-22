@@ -287,7 +287,8 @@ async def show_user_details(user_data, client=None):
         conversations_sorted = sorted(conversations, key=lambda x: x.get('last_message_timestamp', ''), reverse=True)
         
         options_html = ""
-        for conv in conversations_sorted:
+        most_recent_session_id = None
+        for i, conv in enumerate(conversations_sorted):
             session_id = conv.get('session_id', '')
             preview = conv.get('first_message_content', 'No messages')[:50]
             if len(conv.get('first_message_content', '')) > 50:
@@ -297,6 +298,10 @@ async def show_user_details(user_data, client=None):
             
             option_text = f"{preview} ({message_count} msgs) - {timestamp}"
             options_html += f'<option value="{session_id}">{option_text}</option>'
+            
+            # Store the most recent session ID (first in sorted list)
+            if i == 0:
+                most_recent_session_id = session_id
         
         populate_js = f"""
         let select = document.getElementById("conversation_select_{user_id}");
@@ -312,9 +317,17 @@ async def show_user_details(user_data, client=None):
                     window.loadConversationInModal('{user_id}', this.value, '{user_email}');
                 }}
             }});
+            
+            // Auto-select the most recent conversation
+            {f"select.value = '{most_recent_session_id}';" if most_recent_session_id else ""}
         }}
         """
         await client.run_javascript(populate_js)
+        
+        # Auto-load the most recent conversation
+        if most_recent_session_id:
+            print(f"Auto-loading most recent conversation: {most_recent_session_id}")
+            await load_conversation_for_modal(user_id, most_recent_session_id, user_email, db_adapter, client)
     
     # Set up conversation loading with polling mechanism
     conversation_request_key = f"conversation_request_{user_id}"
