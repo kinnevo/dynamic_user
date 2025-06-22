@@ -196,7 +196,7 @@ def create_user_selector(container=None, width='w-1/3'):
     user_select = container.select(
         options={'all': 'All Users'}, 
         multiple=True,
-        value=[]
+        value=['all']  # Default to 'all' selected
     ).classes(width)
     user_select.props('dense outlined label="Select Users" clearable use-chips')
     
@@ -204,7 +204,9 @@ def create_user_selector(container=None, width='w-1/3'):
         try:
             new_options_dict = await load_user_options()
             user_select.options = new_options_dict
-            user_select.value = []  # Reset selection
+            
+            # Set default selection to only "All Users"
+            user_select.value = ['all']  # Only select 'all' option by default
         except Exception as e:
             print(f'Error refreshing users: {str(e)}')  # Use print instead of ui.notify
     
