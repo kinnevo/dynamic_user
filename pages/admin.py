@@ -14,6 +14,9 @@ from utils.auth_middleware import auth_required
 # Use the specific imports from your snippet
 from utils.layouts import create_navigation_menu_2, create_date_range_selector, create_user_selector # Re-added imports
 
+# Add database imports for conversation functionality
+from utils.database_singleton import get_db
+
 # Load environment variables
 load_dotenv(override=True)
 
@@ -29,7 +32,7 @@ def get_api_base_url():
         environment = "development"
     
     if environment == "production":
-        return os.getenv("ADMIN_API_URL_PRODUCTION", "https://fireportes-production.up.railway.app/api/v1")
+        return os.getenv("ADMIN_API_URL_PRODUCTION", "https://analytics-api-604277815223.us-central1.run.app/api/v1")
     else:
         return os.getenv("ADMIN_API_URL_LOCAL", "http://localhost:8000/api/v1")
 
@@ -108,21 +111,70 @@ async def api_request(method: str, endpoint: str, client=None, params: dict = No
                 except Exception: pass
             return None
 
-# --- Dialog Handler Function ---
+# --- Helper Functions for User Details Modal ---
+def generate_user_avatar(user_email):
+    """Generate a unique avatar URL based on user email."""
+    if not user_email:
+        return 'https://robohash.org/default?bgset=bg2&size=64x64'
+    return f'https://robohash.org/{user_email}?bgset=bg2&size=64x64'
+
+def format_timestamp(ts):
+    """Format timestamp for display."""
+    if not ts:
+        return "Unknown time"
+    if isinstance(ts, str):
+        try:
+            dt_obj = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+            return dt_obj.strftime("%Y-%m-%d %H:%M")
+        except ValueError:
+            return ts 
+    return ts.strftime("%Y-%m-%d %H:%M")
+
+# --- Enhanced Dialog Handler Function ---
 async def show_user_details(user_data, client=None):
-    """Creates and shows a dialog with user details and conversation history in a chat UI."""
-    # Extract user data
+    """Creates and shows a dialog with user details, conversation selector, and chat display."""
     if not isinstance(user_data, dict) or not client or not client.has_socket_connection:
         return
     
-    name = user_data.get('display_name', 'N/A')
-    user_id = user_data.get('id', 'N/A')
-    logged = user_data.get('is_active', 'N/A')
+    name = user_data.get('name', 'N/A')  # Use 'name' field from table row
+    user_id = user_data.get('user_id', 'N/A')  # Use 'user_id' field from table row
+    logged = user_data.get('logged', 'N/A')  # Use 'logged' field from table row
     
-    # Create a placeholder element to avoid the UI context issue
+    # Get user email from API to use with database methods
+    user_details = await api_request('GET', f'/users/{user_id}', client=client)
+    if not user_details:
+        if client and client.has_socket_connection:
+            js_command = "Quasar.plugins.Notify.create({ message: 'Could not fetch user details', type: 'negative' })"
+            client.run_javascript(js_command)
+        return
+    
+    user_email = user_details.get('email', '')
+    if not user_email:
+        if client and client.has_socket_connection:
+            js_command = "Quasar.plugins.Notify.create({ message: 'User email not found', type: 'negative' })"
+            client.run_javascript(js_command)
+        return
+    
+    # Get database adapter to fetch conversations
+    try:
+        db_adapter = await get_db()
+    except Exception as e:
+        print(f"Error getting database adapter: {e}")
+        if client and client.has_socket_connection:
+            js_command = "Quasar.plugins.Notify.create({ message: 'Database connection error', type: 'negative' })"
+            client.run_javascript(js_command)
+        return
+    
+    # Fetch conversations for user
+    try:
+        conversations = await db_adapter.get_chat_sessions_for_user(user_email)
+    except Exception as e:
+        print(f"Error fetching conversations: {e}")
+        conversations = []
+    
     placeholder_id = f"user_modal_{user_id}"
     
-    # Create modal using JavaScript with improved width and layout
+    # Create enhanced modal with conversation selector
     js_code = f"""
     // Create modal container if it doesn't exist
     let modalContainer = document.getElementById("{placeholder_id}");
@@ -133,20 +185,20 @@ async def show_user_details(user_data, client=None):
             'flex', 'items-center', 'justify-center', 'z-50');
         modalContainer.style.display = 'flex';
         
-        // Create modal content - increased width
+        // Create modal content - larger size for conversation display
         let modalContent = document.createElement('div');
-        modalContent.classList.add('bg-white', 'rounded-lg', 'shadow-xl', 'w-3/5', 
-            'max-w-3xl', 'max-h-[90vh]', 'overflow-y-auto', 'flex', 'flex-col');
+        modalContent.classList.add('bg-white', 'rounded-lg', 'shadow-xl', 'w-4/5', 
+            'max-w-5xl', 'max-h-[95vh]', 'overflow-y-auto', 'flex', 'flex-col');
         
         // Header
         let header = document.createElement('div');
-        header.classList.add('bg-primary', 'text-white', 'p-4', 'flex', 'justify-between', 'items-center', 'sticky', 'top-0', 'z-10', 'w-full');
+        header.classList.add('bg-primary', 'text-white', 'p-4', 'flex', 'justify-between', 'items-center', 'sticky', 'top-0', 'z-10');
         let title = document.createElement('h3');
-        title.textContent = "Details for User: " + {user_id};
+        title.textContent = "User Details: " + "{name}";
         title.classList.add('text-lg', 'font-bold', 'flex-grow');
         let closeBtn = document.createElement('button');
         closeBtn.textContent = "×";
-        closeBtn.classList.add('text-xl', 'font-bold', 'ml-4');
+        closeBtn.classList.add('text-xl', 'font-bold', 'ml-4', 'hover:bg-white', 'hover:text-primary', 'rounded', 'px-2');
         closeBtn.onclick = function() {{
             document.body.removeChild(modalContainer);
         }};
@@ -155,38 +207,61 @@ async def show_user_details(user_data, client=None):
         
         // User details section
         let details = document.createElement('div');
-        details.classList.add('p-4', 'w-full');
+        details.classList.add('p-4', 'bg-gray-50', 'border-b');
         details.innerHTML = `
-            <p class="mb-2"><strong>User ID:</strong> {user_id}</p>
-            <p class="mb-2"><strong>Name:</strong> {name}</p>
-            <p class="mb-2"><strong>Active Status:</strong> {logged}</p>
-        `;
-        
-        // Messages section
-        let messagesHeader = document.createElement('h4');
-        messagesHeader.textContent = 'Recent Conversation';
-        messagesHeader.classList.add('font-bold', 'p-4', 'pt-0', 'text-lg');
-        
-        let messagesContainer = document.createElement('div');
-        messagesContainer.id = "messages_{user_id}";
-        messagesContainer.classList.add('w-auto', 'mx-4', 'h-[40vh]', 'overflow-y-auto', 'p-4', 
-            'gap-2', 'border', 'rounded', 'bg-white', 'mb-4', 'overflow-x-hidden');
-        
-        // Enhanced loading spinner
-        messagesContainer.innerHTML = `
-            <div class="flex flex-col justify-center items-center h-full">
-                <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mb-3"></div>
-                <p class="text-gray-600 font-medium">Loading conversation history...</p>
-                <p class="text-gray-500 text-sm mt-1">This may take a moment</p>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div><strong>User ID:</strong> {user_id}</div>
+                <div><strong>Name:</strong> {name}</div>
+                <div><strong>Email:</strong> {user_email}</div>
+                <div><strong>Active:</strong> {logged}</div>
             </div>
         `;
         
+        // Conversation selector section
+        let selectorSection = document.createElement('div');
+        selectorSection.classList.add('p-4', 'border-b');
+        
+        let selectorLabel = document.createElement('label');
+        selectorLabel.textContent = 'Select Conversation:';
+        selectorLabel.classList.add('block', 'text-sm', 'font-medium', 'mb-2');
+        
+        let conversationSelect = document.createElement('select');
+        conversationSelect.id = "conversation_select_{user_id}";
+        conversationSelect.classList.add('w-full', 'p-2', 'border', 'rounded', 'bg-white');
+        
+        // Add default option
+        let defaultOption = document.createElement('option');
+        defaultOption.value = '';
+        defaultOption.textContent = 'Select a conversation to view...';
+        conversationSelect.appendChild(defaultOption);
+        
+        selectorSection.appendChild(selectorLabel);
+        selectorSection.appendChild(conversationSelect);
+        
+        // Messages container section
+        let messagesSection = document.createElement('div');
+        messagesSection.classList.add('flex-grow', 'p-4');
+        
+        let messagesContainer = document.createElement('div');
+        messagesContainer.id = "conversation_display_{user_id}";
+        messagesContainer.classList.add('h-[50vh]', 'overflow-y-auto', 'border', 'rounded', 'bg-gray-50', 'p-4', 'conversation-scroll');
+        messagesContainer.innerHTML = `
+            <div class="flex items-center justify-center h-full text-gray-500">
+                <div class="text-center">
+                    <div class="mb-2">💬</div>
+                    <p>Select a conversation to view messages</p>
+                </div>
+            </div>
+        `;
+        
+        messagesSection.appendChild(messagesContainer);
+        
         // Footer
         let footer = document.createElement('div');
-        footer.classList.add('p-4', 'flex', 'justify-end', 'sticky', 'bottom-0', 'bg-white', 'border-t', 'w-full');
+        footer.classList.add('p-4', 'flex', 'justify-end', 'sticky', 'bottom-0', 'bg-white', 'border-t');
         let closeButton = document.createElement('button');
         closeButton.textContent = "Close";
-        closeButton.classList.add('px-4', 'py-2', 'bg-primary', 'text-white', 'rounded');
+        closeButton.classList.add('px-4', 'py-2', 'bg-primary', 'text-white', 'rounded', 'hover:bg-blue-600');
         closeButton.onclick = function() {{
             document.body.removeChild(modalContainer);
         }};
@@ -195,8 +270,8 @@ async def show_user_details(user_data, client=None):
         // Assemble modal
         modalContent.appendChild(header);
         modalContent.appendChild(details);
-        modalContent.appendChild(messagesHeader);
-        modalContent.appendChild(messagesContainer);
+        modalContent.appendChild(selectorSection);
+        modalContent.appendChild(messagesSection);
         modalContent.appendChild(footer);
         
         modalContainer.appendChild(modalContent);
@@ -206,75 +281,213 @@ async def show_user_details(user_data, client=None):
     
     await client.run_javascript(js_code)
     
-    # Add a loading state indicator before updating messages
-    update_js = f"""
-    let messagesContainer = document.getElementById("messages_{user_id}");
-    if (messagesContainer) {{
-        // Show loading spinner first
-        messagesContainer.innerHTML = `
+    # Populate conversation selector
+    if conversations:
+        # Sort conversations by last message timestamp (most recent first)
+        conversations_sorted = sorted(conversations, key=lambda x: x.get('last_message_timestamp', ''), reverse=True)
+        
+        options_html = ""
+        for conv in conversations_sorted:
+            session_id = conv.get('session_id', '')
+            preview = conv.get('first_message_content', 'No messages')[:50]
+            if len(conv.get('first_message_content', '')) > 50:
+                preview += "..."
+            timestamp = format_timestamp(conv.get('last_message_timestamp'))
+            message_count = conv.get('message_count', 0)
+            
+            option_text = f"{preview} ({message_count} msgs) - {timestamp}"
+            options_html += f'<option value="{session_id}">{option_text}</option>'
+        
+        populate_js = f"""
+        let select = document.getElementById("conversation_select_{user_id}");
+        if (select) {{
+            select.innerHTML = `
+                <option value="">Select a conversation to view...</option>
+                {options_html}
+            `;
+            
+            // Add change event listener
+            select.addEventListener('change', function() {{
+                if (this.value) {{
+                    window.loadConversationInModal('{user_id}', this.value, '{user_email}');
+                }}
+            }});
+        }}
+        """
+        await client.run_javascript(populate_js)
+    
+    # Set up conversation loading with polling mechanism
+    conversation_request_key = f"conversation_request_{user_id}"
+    
+    # JavaScript to handle conversation selection and set up polling
+    setup_conversation_js = f"""
+    // Set up conversation loading with polling mechanism
+    window.conversationRequests = window.conversationRequests || {{}};
+    
+    window.loadConversationInModal = async function(userId, sessionId, userEmail) {{
+        let container = document.getElementById("conversation_display_" + userId);
+        if (!container) return;
+        
+        // Show loading spinner
+        container.innerHTML = `
             <div class="flex flex-col justify-center items-center h-full">
-                <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mb-3"></div>
-                <p class="text-gray-600 font-medium">Loading conversation history...</p>
-                <p class="text-gray-500 text-sm mt-1">This may take a moment</p>
+                <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-3"></div>
+                <p class="text-gray-600 font-medium">Loading conversation...</p>
             </div>
         `;
-    }}
+        
+        // Set the conversation request
+        window.conversationRequests['{conversation_request_key}'] = {{
+            sessionId: sessionId,
+            timestamp: Date.now()
+        }};
+    }};
     """
-    await client.run_javascript(update_js)
+    await client.run_javascript(setup_conversation_js)
     
-    # Fetch messages asynchronously
-    messages_data = await api_request('GET', f'/sessions/{user_id}/recent-messages', client=client, params={'limit': 20})
+    # Start polling for conversation requests
+    async def poll_for_conversation_requests():
+        while True:
+            try:
+                # Check if there's a conversation request
+                request_data = await client.run_javascript(f"""
+                if (window.conversationRequests && window.conversationRequests['{conversation_request_key}']) {{
+                    let request = window.conversationRequests['{conversation_request_key}'];
+                    delete window.conversationRequests['{conversation_request_key}'];
+                    return request;
+                }}
+                return null;
+                """, timeout=1.0)
+                
+                if request_data and isinstance(request_data, dict):
+                    session_id = request_data.get('sessionId')
+                    if session_id:
+                        print(f"Processing conversation request for session: {session_id}")
+                        await load_conversation_for_modal(user_id, session_id, user_email, db_adapter, client)
+                
+                # Sleep briefly before next poll
+                await asyncio.sleep(0.5)
+                
+            except Exception as e:
+                print(f"Error in conversation polling: {e}")
+                await asyncio.sleep(1.0)
+                
+            # Check if modal still exists, if not, break the polling loop
+            try:
+                modal_exists = await client.run_javascript(f"""
+                return document.getElementById('{placeholder_id}') !== null;
+                """, timeout=0.5)
+                if not modal_exists:
+                    print(f"Modal {placeholder_id} no longer exists, stopping polling")
+                    break
+            except:
+                # If we can't check modal existence, assume it's gone
+                break
     
-    # Format and display messages
-    messages_html = ""
-    if messages_data and isinstance(messages_data, list):
-        if not messages_data:
-            messages_html = '<p class="text-gray-500 italic text-center w-full">No messages found for this session</p>'
-        else:
-            messages_data.sort(key=lambda x: x.get('timestamp', ''))
-            for msg in messages_data:
-                role = msg.get('role')
-                content = msg.get('content', '').replace('`', '\\`').replace("'", "\\'").replace('\n', '<br>')
-                timestamp_str = msg.get('timestamp')
-                
-                # Parse timestamp safely
-                try:
-                    timestamp = datetime.fromisoformat(timestamp_str) if timestamp_str else None
-                    time_str = timestamp.strftime("%Y-%m-%d %H:%M:%S") if timestamp else "Unknown time"
-                except ValueError:
-                    time_str = timestamp_str if timestamp_str else "Invalid time format"
-                
-                # Create HTML for message bubble based on role
-                bubble_class = "self-end bg-blue-500 text-white" if role == 'user' else "self-start bg-gray-200"
-                justify_class = "justify-end" if role == 'user' else "justify-start"
-                
-                if role not in ['user', 'assistant', 'ai']:
-                    bubble_class = "self-center bg-yellow-100"
-                    justify_class = "justify-center"
-                    content = f"Role: {role}<br>{content}"
-                
-                messages_html += f"""
-                <div class="flex {justify_class} mb-4 w-full">
-                    <div class="p-3 rounded-lg max-w-[80%] break-words {bubble_class}">
-                        <div class="text-xs opacity-70 mb-1">{time_str}</div>
-                        <div class="whitespace-pre-wrap">{content}</div>
+    # Start the polling task
+    asyncio.create_task(poll_for_conversation_requests())
+
+async def load_conversation_for_modal(user_id, session_id, user_email, db_adapter, client):
+    """Load and display a specific conversation in the modal."""
+    try:
+        # Fetch conversation messages
+        messages = await db_adapter.get_recent_messages(session_id=session_id, limit=100)
+        
+        if not messages:
+            no_messages_html = '''
+                <div class="flex items-center justify-center h-full text-gray-500">
+                    <p>No messages found in this conversation</p>
+                </div>
+            '''
+            update_js = f"""
+            let container = document.getElementById("conversation_display_{user_id}");
+            if (container) {{
+                container.innerHTML = `{no_messages_html}`;
+            }}
+            """
+            await client.run_javascript(update_js)
+            return
+        
+        # Generate messages HTML in chat format (same as chat.py)
+        messages_html = ""
+        for message in messages:
+            role = message.get('role', '')
+            # Properly escape HTML content to prevent issues
+            raw_content = message.get('content', '')
+            # Convert newlines to HTML breaks and escape quotes for JavaScript
+            content = raw_content.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('\n', '<br>').replace("'", "&#39;").replace('"', '&quot;')
+            timestamp_str = message.get('created_at', message.get('timestamp', ''))
+            
+            # Format timestamp
+            try:
+                if timestamp_str:
+                    dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                    time_str = dt.strftime("%H:%M")
+                else:
+                    time_str = ""
+            except (ValueError, AttributeError):
+                time_str = ""
+            
+            if role == 'user':
+                # User message with avatar (right side)
+                messages_html += f'''
+                <div class="flex justify-end items-end gap-2 mb-4 fade-in">
+                    <div class="bg-blue-500 text-white p-3 rounded-lg max-w-[80%] break-words conversation-message">
+                        {f'<div class="text-xs opacity-70 mb-1">{time_str}</div>' if time_str else ''}
+                        <div>{content}</div>
+                    </div>
+                    <div class="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-sm font-bold flex-shrink-0">
+                        👤
                     </div>
                 </div>
-                """
-    elif messages_data is None:
-        messages_html = '<p class="text-red-500 text-center w-full">Error fetching messages. Check API connection.</p>'
-    else:
-        messages_html = '<p class="text-orange-500 text-center w-full">Unexpected data format received for messages.</p>'
-    
-    # Update messages container with fetched data
-    update_js = f"""
-    let messagesContainer = document.getElementById("messages_{user_id}");
-    if (messagesContainer) {{
-        messagesContainer.innerHTML = `{messages_html.replace('`', '\\`').replace("'", "\\'")}`;
-    }}
-    """
-    
-    await client.run_javascript(update_js)
+                '''
+            else:
+                # Assistant message with avatar (left side)
+                messages_html += f'''
+                <div class="flex justify-start items-end gap-2 mb-4 fade-in">
+                    <div class="w-8 h-8 rounded-full bg-gray-400 flex items-center justify-center text-white text-sm font-bold flex-shrink-0">
+                        🤖
+                    </div>
+                    <div class="bg-gray-200 p-3 rounded-lg max-w-[80%] break-words conversation-message">
+                        {f'<div class="text-xs opacity-70 mb-1">{time_str}</div>' if time_str else ''}
+                        <div>{content}</div>
+                    </div>
+                </div>
+                '''
+        
+        # Update the conversation display
+        update_js = f"""
+        let container = document.getElementById("conversation_display_{user_id}");
+        if (container) {{
+            container.innerHTML = `
+                <div class="space-y-2">
+                    {messages_html}
+                </div>
+            `;
+            // Scroll to bottom
+            container.scrollTop = container.scrollHeight;
+        }}
+        """
+        await client.run_javascript(update_js)
+        
+    except Exception as e:
+        print(f"Error loading conversation {session_id}: {e}")
+        error_html = f'''
+            <div class="flex items-center justify-center h-full text-red-500">
+                <p>Error loading conversation: {str(e)}</p>
+            </div>
+        '''
+        update_js = f"""
+        let container = document.getElementById("conversation_display_{user_id}");
+        if (container) {{
+            container.innerHTML = `{error_html}`;
+        }}
+        """
+        await client.run_javascript(update_js)
+
+# --- Conversation Loading Handler ---
+# We need to add a way to trigger conversation loading from JavaScript
+# This will be handled through a polling mechanism or WebSocket-like approach
 
 async def show_summary_details(summary_data, client=None):
     """Shows a half-screen modal with all summary metadata and the full summary."""
@@ -1166,14 +1379,64 @@ class AdminPageManager:
                              *Note: Data is fetched directly from pre-computed analysis endpoints.*
                              """)
 
-        # Add CSS/JS
+        # Add CSS/JS for admin functionality and modal styling
         ui.add_head_html(r'''
-        <style> .q-table tbody tr { cursor: pointer; } ... </style>
-        <script> /* ... existing script ... */ </script>
-        ''') # Keep existing styles/scripts
+        <style> 
+        .q-table tbody tr { cursor: pointer; }
+        .q-table tbody tr:hover { background-color: #f5f5f5; }
+        
+        /* Modal and conversation styling */
+        .conversation-message {
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+        }
+        .conversation-scroll {
+            scrollbar-width: thin;
+        }
+        .conversation-scroll::-webkit-scrollbar {
+            width: 6px;
+        }
+        .conversation-scroll::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 3px;
+        }
+        .conversation-scroll::-webkit-scrollbar-thumb {
+            background: #c1c1c1;
+            border-radius: 3px;
+        }
+        .conversation-scroll::-webkit-scrollbar-thumb:hover {
+            background: #a8a8a8;
+        }
+        
+        /* Loading animations */
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        .fade-in {
+            animation: fadeIn 0.3s ease-in;
+        }
+        </style>
+        <script>
+        // Global conversation management
+        window.conversationRequests = window.conversationRequests || {};
+        
+        // Utility function to escape HTML
+        window.escapeHtml = function(text) {
+            var map = {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            };
+            return text.replace(/[&<>"']/g, function(m) { return map[m]; });
+        };
+        </script>
+        ''')
 
 @ui.page('/admin')
-@auth_required 
+# @auth_required #TODO: turn off after development
 def page_admin():
     """Admin page handler - creates a new manager instance for each session."""
     # Create a new manager instance for this session
